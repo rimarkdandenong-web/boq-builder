@@ -206,7 +206,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
         <button class="btn primary" id="p-add">+ Add item</button>
       </div>
     </div>
-    <p class="muted pad">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item and type the new name in the Category or Sub-category box of the new row. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built.</p>
+    <p class="muted pad">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item, open the Category (or Sub-category) list and choose the first entry, Add new category, then type the new name. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built.</p>
     <div class="btns pad">
       <button class="btn" id="p-import">Import from Excel</button>
       <button class="btn" id="p-export">Export to Excel</button>
@@ -1245,13 +1245,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
   }
+  const NEWCAT = '\u2795 Add new category...', NEWSUB = '\u2795 Add new sub-category...';
   function refreshLists() {
     if ($('#dl-types') && !$('#dl-types').children.length) fillDl('#dl-types', prices.map(p => p.type));
     const o = ord(), subs = [], units = ['m', 'm²', 'm³', 'kg', 'tonne', 'each', 'hour', 'day', 'box', 'bag', 'pack', 'L', 'pair', 'set'];
     o.cats.forEach(c => (o.subs[c] || []).forEach(s => { if (subs.indexOf(s) < 0) subs.push(s); }));
     prices.forEach(p => { if (p.unit && units.indexOf(p.unit) < 0) units.push(p.unit); });
     const fill = (id, arr) => { $(id).innerHTML = arr.map(v => '<option value="' + esc(v) + '">').join(''); };
-    fill('#dl-cats', o.cats); fill('#dl-subs', subs); fill('#dl-units', units);
+    fill('#dl-cats', [NEWCAT].concat(o.cats)); fill('#dl-subs', [NEWSUB].concat(subs)); fill('#dl-units', units);
   }
   function pricesChanged() { ordCache = null; savePrices(); refreshLists(); }
 
@@ -1549,7 +1550,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       const f = t.dataset.f || (t.id || '').replace('n-', ''), c = ctxOf(t);
       if (c) {
         const inC = prices.filter(p => c.cat && inCat(p, c.cat));
-        if (f === 'sub') { const subs = ord().subs[c.cat] || []; if (subs.length) fillDl('#dl-subs', subs); }
+        if (f === 'sub') { const subs = ord().subs[c.cat] || []; if (subs.length) { fillDl('#dl-subs', subs); $('#dl-subs').insertAdjacentHTML('afterbegin', '<option value="' + esc(NEWSUB) + '">'); } }
         if (f === 'type') fillDl('#dl-types', inC.filter(p => !c.sub || p.sub === c.sub).map(p => p.type));
         if (f === 'spec') fillDl('#dl-specs', inC.filter(p => p.sub === c.sub && p.type === c.type).map(p => p.spec));
         if (f === 'spec2') fillDl('#dl-spec2s', inC.filter(p => p.sub === c.sub && p.type === c.type).map(p => p.spec2));
@@ -1566,6 +1567,10 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#prices').addEventListener('input', e => {
     const t = e.target, f = t.dataset.f; if (!f) return;
     const p = prices[+t.closest('tr').dataset.i]; if (!p) return;
+    if ((f === 'cat' && t.value === NEWCAT) || (f === 'sub' && t.value === NEWSUB)) {
+      t.value = ''; t.placeholder = f === 'cat' ? 'Type the new category name' : 'Type the new sub-category name';
+      toast('Type the new name in this box, then press Tab.'); return;
+    }
     if (f === 'also') p.also = parseAlso(t.value, p.cat);
     else {
       p[f] = f === 'rate' ? (parseFloat(t.value) || 0) : t.value;
