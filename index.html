@@ -110,6 +110,8 @@ td.sup{min-width:170px}
 .seg button.on{background:#14233b;color:#fff}
 h3.gh{margin:16px 0 6px;font-size:15px;color:#14233b}
 #s-cat{width:auto;min-width:150px}#s-search{width:200px}
+.schip.pri{background:#14233b;color:#fff}.schip.pri .x{color:#cbd5e1}.schip .sn{cursor:pointer}
+.schip .srate{width:62px;border:1px solid #cbd5e1;border-radius:6px;padding:1px 4px;font:inherit;font-size:12px;background:#fff}
 
 </style>
 </head>
@@ -231,7 +233,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
     </div>
     <div class="twrap tall">
       <table class="plain prices" id="ptable">
-        <thead><tr><th>Code</th><th>Category</th><th>Sub-category</th><th>Item type</th><th>Spec 1 (size / type)</th><th>Spec 2 (length / grade)</th><th>Unit</th><th class="r">Rate ($)</th><th title="Other categories where this same item can be picked (one price, listed under each). Separate with commas, e.g. Decking, Gardening">Also used in</th><th title="Who sells this item. Pick or type a supplier; several allowed. New names are saved to the Suppliers list and prefill the BOQ line.">Supplier(s)</th><th></th></tr></thead>
+        <thead><tr><th>Code</th><th>Category</th><th>Sub-category</th><th>Item type</th><th>Spec 1 (size / type)</th><th>Spec 2 (length / grade)</th><th>Unit</th><th class="r" title="Standard rate, used when no supplier is chosen">Rate ($)</th><th title="Other categories where this same item can be picked (one price, listed under each). Separate with commas, e.g. Decking, Gardening">Also used in</th><th title="Who sells this item and at what price. Each supplier has its own price. Pick or type a supplier; new names are saved to the Suppliers list. On the BOQ screen the rate comes from the first supplier.">Supplier(s) and their price ($)</th><th></th></tr></thead>
         <tbody id="prices"></tbody>
       </table>
     </div>
@@ -1001,7 +1003,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     ws.headerFooter.oddFooter = '&L&8' + String(settings.company || '').replace(/&/g, '&&') + '&R&8Page &P of &N';
     if (!opts.client) {            // internal copy only: which supplier(s) to buy each item from
       const rows = [];
-      model.sections.forEach(sec => sec.subs.forEach(sb => sb.items.forEach(it => { if (it.sup && it.sup.length) rows.push([it.no, sec.cat, it.desc, it.qty, it.unit, it.sup.join(', ')]); })));
+      model.sections.forEach(sec => sec.subs.forEach(sb => sb.items.forEach(it => { if (it.sup && it.sup.length) rows.push([it.no, sec.cat, it.desc, it.qty, it.unit, it.sup.map((n, k) => k === 0 ? n + ' (priced)' : n).join(', ')]); })));
       if (rows.length) {
         const sw = wb.addWorksheet('Suppliers (internal)', { views: [{ showGridLines: false }] });
         sw.columns = [{ width: 8 }, { width: 22 }, { width: 50 }, { width: 10 }, { width: 10 }, { width: 44 }];
@@ -1252,7 +1254,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       type, spec, spec2, desc: hasType ? joinDesc(type, spec, spec2) : String(p.desc || ''),
       unit: String(p.unit || ''), rate: +p.rate || 0,
       also: parseAlso(p.also, String(p.cat || '').trim()), note: String(p.note || ''),
-      sups: (Array.isArray(p.sups) ? p.sups : String(p.sups || '').split(/[,;]/)).map(v => String(v).trim()).filter((v, i, a) => v && a.indexOf(v) === i),
+      sups: (Array.isArray(p.sups) ? p.sups : String(p.sups || '').split(/[;,]/)).map(x => {
+        if (x && typeof x === 'object') return { name: String(x.name || '').trim(), rate: x.rate == null ? (+p.rate || 0) : (+x.rate || 0) };
+        const m = /^(.*?)\s*\(\s*\$?\s*([\d.]+)\s*\)\s*$/.exec(String(x).trim());
+        return m ? { name: m[1].trim(), rate: +m[2] || 0 } : { name: String(x).trim(), rate: +p.rate || 0 };
+      }).filter((v, k, a) => v.name && a.findIndex(y => y.name === v.name) === k),
       ord: typeof p.ord === 'number' ? p.ord : undefined
     };
   });
@@ -1342,8 +1348,18 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   const uniq = arr => arr.filter((v, i) => arr.indexOf(v) === i);
   const priceTxt = p => '   (' + money(p.rate) + ' / ' + p.unit + ')';
 
-  const supCell = (arr, f) => (arr || []).map((n, k) => '<span class="schip">' + esc(n) + '<button class="x" data-act="supdel" data-k="' + k + '" title="Remove supplier">&times;</button></span>').join('') +
-    '<input data-f="' + f + '" list="dl-sup" autocomplete="off" placeholder="' + ((arr || []).length ? '+ add another' : 'Supplier...') + '">';
+  const supRate = (p, name) => { const e = p && (p.sups || []).find(x => x.name === name); return e ? e.rate : null; };
+  const expRate = (lp, l) => { const r = (l.suppliers || []).length ? supRate(lp, l.suppliers[0]) : null; return r != null ? r : lp.rate; };
+  const lineChips = (l, lp) => (l.suppliers || []).map((n, k) => { const r = lp ? supRate(lp, n) : null;
+    return '<span class="schip' + (k === 0 ? ' pri' : '') + '"><span class="sn" data-act="suppri" data-k="' + k + '" title="' + (k === 0 ? 'Rate is taken from this supplier' : 'Click to price from this supplier') + '">' + esc(n) + (r != null ? ' ' + money(r) : '') + '</span><button class="x" data-act="supdel" data-k="' + k + '" title="Remove supplier">&times;</button></span>'; }).join('') +
+    '<input data-f="sup" list="dl-sup" autocomplete="off" placeholder="' + ((l.suppliers || []).length ? '+ add another' : 'Supplier...') + '">';
+  const priceChips = p => (p.sups || []).map((x, k) => '<span class="schip">' + esc(x.name) + ' $<input class="srate" type="number" step="any" min="0" data-f="srate" data-k="' + k + '" value="' + esc(x.rate) + '" title="Price from this supplier ($, ex GST)"><button class="x" data-act="supdel" data-k="' + k + '" title="Remove supplier">&times;</button></span>').join('') +
+    '<input data-f="psup" list="dl-sup" autocomplete="off" placeholder="' + ((p.sups || []).length ? '+ add another' : 'Supplier...') + '">';
+  function repriceLine(l) {
+    if (l.custom || !l.desc) return;
+    const lp = listPrice(l), n = (l.suppliers || [])[0], r = lp && n ? supRate(lp, n) : null;
+    if (r != null) l.rate = r;
+  }
   function rowInner(l, idx) {
     const o = ord();
     const cats = o.cats.slice(); if (l.cat && cats.indexOf(l.cat) < 0) cats.push(l.cat);
@@ -1385,13 +1401,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }
     const unit = l.custom ? '<input data-f="unit" list="dl-units" value="' + esc(l.unit) + '">' : '<span class="unit">' + esc(l.unit) + '</span>';
     const lp = listPrice(l);
-    const over = !l.custom && lp && Math.abs(lp.rate - (+l.rate || 0)) > 1e-9;
+    const over = !l.custom && lp && Math.abs(expRate(lp, l) - (+l.rate || 0)) > 1e-9;
     const rateOn = l.custom || l.desc;
     return '<td class="n">' + (idx + 1) + '</td><td>' + catSel + '</td><td>' + item + '</td><td>' + specCell + '</td><td>' + spec2Cell + '</td>' +
-      '<td class="sup">' + supCell(l.suppliers, 'sup') + '</td>' +
+      '<td class="sup">' + lineChips(l, listPrice(l)) + '</td>' +
       '<td><input type="number" step="any" min="0" data-f="qty" value="' + esc(l.qty) + '"></td>' +
       '<td class="unit">' + unit + '</td>' +
-      '<td><input type="number" step="any" min="0" data-f="rate" class="' + (over ? 'over' : '') + '" title="' + (over ? 'Differs from price list (' + money(lp.rate) + ')' : '') + '" value="' + (rateOn ? esc(l.rate) : '') + '"' + (rateOn ? '' : ' disabled') + '></td>' +
+      '<td><input type="number" step="any" min="0" data-f="rate" class="' + (over ? 'over' : '') + '" title="' + (over ? 'Differs from price list (' + money(expRate(lp, l)) + ')' : '') + '" value="' + (rateOn ? esc(l.rate) : '') + '"' + (rateOn ? '' : ' disabled') + '></td>' +
       '<td class="amt">' + amountText(l) + '</td>' +
       '<td><button class="iconbtn" data-act="dup" title="Duplicate line">&#10697;</button><button class="iconbtn" data-act="del" title="Delete line">&#10005;</button></td>';
   }
@@ -1420,7 +1436,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const t = e.target, f = t.dataset.f; if (!f || t.tagName !== 'SELECT') return;
     const l = lineOf(t); if (!l) return;
     const v = t.value;
-    const apply = p => { Object.assign(l, { sub: p.sub, type: typeOf(p), spec: p.spec, desc: p.desc, unit: p.unit, rate: p.rate }); if (!(l.suppliers || []).length && (p.sups || []).length) l.suppliers = p.sups.slice(); renderRow(l.id, 'qty'); };
+    const apply = p => { Object.assign(l, { sub: p.sub, type: typeOf(p), spec: p.spec, desc: p.desc, unit: p.unit, rate: p.rate }); if (!(l.suppliers || []).length && (p.sups || []).length) l.suppliers = p.sups.slice().sort((a, b) => a.rate - b.rate).map(x => x.name); repriceLine(l); renderRow(l.id, 'qty'); };
     const clear = extra => Object.assign(l, { desc: '', unit: '', rate: 0 }, extra);
     if (f === 'cat') { clear({ cat: v, sub: '', type: '', spec: '', custom: false }); renderRow(l.id, 'type'); }
     else if (f === 'type') {
@@ -1446,7 +1462,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const t = e.target, f = t.dataset.f; if (!f || t.tagName === 'SELECT' || f === 'sup') return;
     const l = lineOf(t); if (!l) return;
     if (f === 'qty') l.qty = t.value;
-    else if (f === 'rate') { l.rate = t.value === '' ? 0 : parseFloat(t.value); const lp = listPrice(l); t.classList.toggle('over', !l.custom && !!lp && Math.abs(lp.rate - l.rate) > 1e-9); }
+    else if (f === 'rate') { l.rate = t.value === '' ? 0 : parseFloat(t.value); const lp = listPrice(l); t.classList.toggle('over', !l.custom && !!lp && Math.abs(expRate(lp, l) - l.rate) > 1e-9); }
     else if (f === 'desc') l.desc = t.value;
     else if (f === 'unit') l.unit = t.value;
     const tr = t.closest('tr');
@@ -1458,7 +1474,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const b = e.target.closest('[data-act]'); if (!b) return;
     const l = lineOf(b); if (!l) return;
     const i = job.lines.indexOf(l);
-    if (b.dataset.act === 'supdel') { (l.suppliers || []).splice(+b.dataset.k, 1); renderRow(l.id); saveJobDraft(); return; }
+    if (b.dataset.act === 'supdel') { (l.suppliers || []).splice(+b.dataset.k, 1); repriceLine(l); renderRow(l.id); renderTotals(); saveJobDraft(); return; }
+    if (b.dataset.act === 'suppri') { const k = +b.dataset.k; if (k > 0) { l.suppliers.unshift(l.suppliers.splice(k, 1)[0]); repriceLine(l); renderRow(l.id); renderTotals(); saveJobDraft(); } return; }
     if (b.dataset.act === 'del') {
       job.lines.splice(i, 1); if (!job.lines.length) job.lines.push(newLine());
     } else {
@@ -1476,10 +1493,17 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 
   /* ---------- suppliers on BOQ lines ---------- */
   const supNames = () => suppliers.map(x => x.name).filter(Boolean);
-  function fillSupList(cat, taken) {
+  function fillSupList(cat, taken, prefer) {
     const dl = $('#dl-sup'); if (!dl) return;
-    const list = suppliers.filter(x => x.name && (taken || []).indexOf(x.name) < 0).sort((a, b) => ((cat && b.cats.indexOf(cat) >= 0) - (cat && a.cats.indexOf(cat) >= 0)) || a.name.localeCompare(b.name));
+    const pf = x => (prefer || []).indexOf(x.name) >= 0 ? 2 : (cat && x.cats.indexOf(cat) >= 0 ? 1 : 0);
+    const list = suppliers.filter(x => x.name && (taken || []).indexOf(x.name) < 0).sort((a, b) => (pf(b) - pf(a)) || a.name.localeCompare(b.name));
     dl.innerHTML = list.map(x => '<option value="' + esc(x.name) + '">' + (x.cats.length ? esc(x.cats.join(', ')) : '') + '</option>').join('');
+  }
+  function ensureSup(name, cat) {
+    let s = suppliers.find(x => x.name.toLowerCase() === name.toLowerCase()), created = false;
+    if (!s) { s = { id: uid(), name, cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created = true; }
+    if (cat && s.cats.indexOf(cat) < 0) s.cats.push(cat);
+    return created;
   }
   /* put names on holder[field], creating missing suppliers and tagging each with the category */
   function addSuppliersTo(holder, raw, field, cat) {
@@ -1490,25 +1514,26 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (!s) { s = { id: uid(), name: n, cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created.push(n); }
       if (cat && s.cats.indexOf(cat) < 0) s.cats.push(cat);
       holder[field] = holder[field] || [];
-      if (holder[field].indexOf(s.name) < 0) holder[field].push(s.name);
+      if (field === 'sups') { if (!holder.sups.some(x => x.name === s.name)) holder.sups.push({ name: s.name, rate: +holder.rate || 0 }); }
+      else if (holder[field].indexOf(s.name) < 0) holder[field].push(s.name);
     });
     if (names.length) saveSuppliers();
     if (created.length) toast('New supplier saved to the Suppliers list: ' + created.join(', '));
     return names.length > 0;
   }
-  $('#lines').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'sup') { const l = lineOf(t); if (l) fillSupList(l.cat, l.suppliers); } });
+  $('#lines').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'sup') { const l = lineOf(t); if (l) { const lp = listPrice(l); fillSupList(l.cat, l.suppliers, lp ? (lp.sups || []).map(x => x.name) : []); } } });
   $('#lines').addEventListener('change', e => {
     const t = e.target; if (!t.dataset || t.dataset.f !== 'sup') return;
     const l = lineOf(t); if (!l) return;
-    const v = t.value; t.value = '';
-    if (addSuppliersTo(l, v)) { saveJobDraft(); renderRow(l.id); }
+    const v = t.value, was = (l.suppliers || [])[0]; t.value = '';
+    if (addSuppliersTo(l, v)) { if (l.suppliers[0] !== was) repriceLine(l); saveJobDraft(); renderRow(l.id); renderTotals(); }
   });
   $('#lines').addEventListener('keydown', e => {
     const t = e.target; if (e.key !== 'Enter' || !t.dataset || t.dataset.f !== 'sup') return;
     e.preventDefault();
     const l = lineOf(t); if (!l) return;
-    const v = t.value; t.value = '';
-    if (addSuppliersTo(l, v)) { saveJobDraft(); renderRow(l.id, 'sup'); }
+    const v = t.value, was = (l.suppliers || [])[0]; t.value = '';
+    if (addSuppliersTo(l, v)) { if (l.suppliers[0] !== was) repriceLine(l); saveJobDraft(); renderRow(l.id, 'sup'); renderTotals(); }
   });
 
   /* ---------- totals ---------- */
@@ -1680,7 +1705,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const q = ($('#p-search').value || '').toLowerCase().trim();
     let h = '', n = 0;
     prices.forEach((p, i) => {
-      if (q && (p.code + ' ' + p.cat + ' ' + p.sub + ' ' + p.desc + ' ' + p.unit + ' ' + (p.also || []).join(' ') + ' ' + (p.note || '') + ' ' + (p.sups || []).join(' ')).toLowerCase().indexOf(q) < 0) return;
+      if (q && (p.code + ' ' + p.cat + ' ' + p.sub + ' ' + p.desc + ' ' + p.unit + ' ' + (p.also || []).join(' ') + ' ' + (p.note || '') + ' ' + (p.sups || []).map(x => x.name).join(' ')).toLowerCase().indexOf(q) < 0) return;
       n++;
       h += '<tr data-i="' + i + '"><td><input data-f="code" value="' + esc(p.code) + '"></td>' +
         '<td><input data-f="cat" list="dl-cats" value="' + esc(p.cat) + '"></td>' +
@@ -1691,7 +1716,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         '<td><input data-f="unit" list="dl-units" value="' + esc(p.unit) + '"></td>' +
         '<td><input data-f="rate" type="number" step="any" min="0" value="' + esc(p.rate) + '"></td>' +
         '<td><input data-f="also" placeholder="e.g. Decking, Gardening" value="' + esc((p.also || []).join(', ')) + '"></td>' +
-        '<td class="sup">' + supCell(p.sups, 'psup') + '</td>' +
+        '<td class="sup">' + priceChips(p) + '</td>' +
         '<td><button class="iconbtn" data-act="padd" title="Add another size / spec under this item">&#43;</button><button class="iconbtn" data-act="pdel" title="Delete item">&#10005;</button></td></tr>';
     });
     $('#prices').innerHTML = h;
@@ -1730,6 +1755,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   showAll($('#prices')); showAll($('#lines'));
   $('#prices').addEventListener('input', e => {
     const t = e.target, f = t.dataset.f; if (!f || f === 'psup') return;
+    if (f === 'srate') { const pp = prices[+t.closest('tr').dataset.i]; if (pp && pp.sups[+t.dataset.k]) { pp.sups[+t.dataset.k].rate = parseFloat(t.value) || 0; pricesChanged(); } return; }
     const p = prices[+t.closest('tr').dataset.i]; if (!p) return;
     if ((f === 'cat' && t.value === NEWCAT) || (f === 'sub' && t.value === NEWSUB)) {
       t.value = ''; t.placeholder = f === 'cat' ? 'Type the new category name' : 'Type the new sub-category name';
@@ -1747,8 +1773,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const t = e.target;
     if (t.dataset.f === 'sub' && !t.value.trim()) { t.value = 'General'; prices[+t.closest('tr').dataset.i].sub = 'General'; pricesChanged(); }
   });
-  const priceSupCell = tr => { const p = prices[+tr.dataset.i]; $('td.sup', tr).innerHTML = supCell(p.sups, 'psup'); return p; };
-  $('#prices').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'psup') { const p = prices[+t.closest('tr').dataset.i]; if (p) fillSupList(p.cat, p.sups); } });
+  const priceSupCell = tr => { const p = prices[+tr.dataset.i]; $('td.sup', tr).innerHTML = priceChips(p); return p; };
+  $('#prices').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'psup') { const p = prices[+t.closest('tr').dataset.i]; if (p) fillSupList(p.cat, (p.sups || []).map(x => x.name)); } });
   const commitPriceSup = (t, refocus) => {
     const tr = t.closest('tr'), p = prices[+tr.dataset.i]; if (!p) return;
     const v = t.value; t.value = '';
@@ -1762,7 +1788,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const pa = e.target.closest('[data-act="padd"]');
     if (pa) {
       const i = +pa.closest('tr').dataset.i, p = prices[i];
-      prices.splice(i + 1, 0, { id: uid(), code: '', cat: p.cat, sub: p.sub, type: p.type, spec: '', spec2: '', desc: p.type, unit: p.unit, rate: 0, also: (p.also || []).slice(), note: '', sups: (p.sups || []).slice() });
+      prices.splice(i + 1, 0, { id: uid(), code: '', cat: p.cat, sub: p.sub, type: p.type, spec: '', spec2: '', desc: p.type, unit: p.unit, rate: 0, also: (p.also || []).slice(), note: '', sups: (p.sups || []).map(x => ({ name: x.name, rate: 0 })) });
       $('#p-search').value = ''; pricesChanged(); renderPrices();
       const tr = $('#prices tr[data-i="' + (i + 1) + '"]');
       if (tr) { tr.classList.add('newrow'); tr.scrollIntoView({ block: 'center' }); $('[data-f="spec"]', tr).focus(); }
@@ -1802,7 +1828,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     try {
       const wb = new window.ExcelJS.Workbook(); const ws = wb.addWorksheet('PriceList');
       ws.columns = [{ header: 'Item Code', width: 12 }, { header: 'Category', width: 18 }, { header: 'Sub-category', width: 26 }, { header: 'Item type', width: 40 }, { header: 'Spec 1 (size / type)', width: 30 }, { header: 'Spec 2 (length / grade)', width: 26 }, { header: 'Unit', width: 9 }, { header: 'Unit Rate ($)', width: 14 }, { header: 'Also used in', width: 30 }, { header: 'Supplier / basis', width: 48 }, { header: 'Suppliers', width: 36 }];
-      prices.forEach(p => ws.addRow([p.code, p.cat, p.sub, p.type, p.spec, p.spec2, p.unit, p.rate, (p.also || []).join(', '), p.note || '', (p.sups || []).join(', ')]));
+      prices.forEach(p => ws.addRow([p.code, p.cat, p.sub, p.type, p.spec, p.spec2, p.unit, p.rate, (p.also || []).join(', '), p.note || '', (p.sups || []).map(x => x.name + ' (' + (+x.rate).toFixed(2) + ')').join('; ')]));
       const hr = ws.getRow(1);
       hr.eachCell(c => { c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3864' } }; });
       ws.eachRow((r, n) => { if (n > 1) r.eachCell(c => { c.font = { name: 'Arial', size: 10 }; }); });
@@ -1858,7 +1884,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         normPrices(out).forEach(p => { const k = key(p); if (k in idx) { Object.assign(prices[idx[k]], { unit: p.unit, rate: p.rate, code: p.code || prices[idx[k]].code, also: (p.also && p.also.length) ? p.also : prices[idx[k]].also, note: p.note || prices[idx[k]].note || '', sups: (p.sups && p.sups.length) ? p.sups : (prices[idx[k]].sups || []) }); upd++; } else { prices.push(p); add++; } });
         toast('Merged: ' + upd + ' updated, ' + add + ' added');
       }
-      prices.forEach(p => { if (p.sups && p.sups.length) addSuppliersTo(p, p.sups.join(','), 'sups', p.cat); });
+      prices.forEach(p => (p.sups || []).forEach(x => ensureSup(x.name, p.cat)));
       pricesChanged(); renderPrices();
       if (r === 0) toast('Price list replaced (' + prices.length + ' items)');
     } catch (err) { console.error(err); toast('Import failed: ' + err.message); }
