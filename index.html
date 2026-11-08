@@ -113,6 +113,12 @@ h3.gh{margin:16px 0 6px;font-size:15px;color:#14233b}
 .schip.pri{background:#14233b;color:#fff}.schip.pri .x{color:#cbd5e1}.schip .sn{cursor:pointer}
 .schip .srate{width:62px;border:1px solid #cbd5e1;border-radius:6px;padding:1px 4px;font:inherit;font-size:12px;background:#fff}
 
+.savebar{position:sticky;bottom:0;display:flex;gap:10px;align-items:center;justify-content:flex-end;background:#fff7e0;border-top:2px solid #f0b429;padding:10px 16px;z-index:20;margin:0 -1px;border-radius:0 0 12px 12px}
+.savebar span{margin-right:auto;font-weight:600;color:#7a4b00}
+.cat-mgr{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin:0 16px 12px;padding:12px}
+.cm-cat{margin:10px 0 14px}.cm-row{display:flex;align-items:center;gap:8px;margin:4px 0}.cm-row input{flex:1;max-width:340px}.cm-row.sub{margin-left:28px}.cm-row.sub input{max-width:300px}
+.cat-mgr{max-height:340px;overflow:auto}
+
 </style>
 </head>
 <body>
@@ -222,15 +228,17 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
         <button class="btn primary" id="p-add">+ Add item</button>
       </div>
     </div>
-    <p class="muted pad">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item, open the Category (or Sub-category) list and choose the first entry, Add new category, then type the new name. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built.</p>
+    <p class="muted pad">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item, open the Category (or Sub-category) list and choose the first entry, Add new category, then type the new name. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built. Your edits are not saved until you press Save changes.</p>
     <div class="btns pad">
       <button class="btn" id="p-import">Import from Excel</button>
       <button class="btn" id="p-export">Export to Excel</button>
       <button class="btn" id="p-group">Group by category</button>
+      <button class="btn" id="p-cats">Manage categories</button>
       <button class="btn danger" id="p-clear">Clear all items</button>
       <button class="btn danger" id="p-reset">Reset to sample prices</button>
       <input type="file" id="p-file" accept=".xlsx" hidden>
     </div>
+    <div id="cat-mgr" class="cat-mgr pad" hidden></div>
     <div class="twrap tall">
       <table class="plain prices" id="ptable">
         <thead><tr><th>Code</th><th>Category</th><th>Sub-category</th><th>Item type</th><th>Spec 1 (size / type)</th><th>Spec 2 (length / grade)</th><th>Unit</th><th class="r" title="Standard rate, used when no supplier is chosen">Rate ($)</th><th title="Other categories where this same item can be picked (one price, listed under each). Separate with commas, e.g. Decking, Gardening">Also used in</th><th title="Who sells this item and at what price. Each supplier has its own price. Pick or type a supplier; new names are saved to the Suppliers list. On the BOQ screen the rate comes from the first supplier.">Supplier(s) and their price ($)</th><th></th></tr></thead>
@@ -239,6 +247,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
     </div>
     <p class="muted pad" id="p-count"></p>
   </div>
+  <div class="savebar" id="p-bar" hidden><span>You have unsaved changes.</span><button class="btn" id="p-discard">Discard</button><button class="btn primary" id="p-save">Save changes</button></div>
 </section>
 
 <!-- ============ SUPPLIERS ============ -->
@@ -259,6 +268,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
       <tbody id="s-rows"></tbody>
     </table></div>
     <div id="s-bycat" class="pad" hidden></div>
+    <div class="savebar" id="s-bar" hidden><span>You have unsaved changes.</span><button class="btn" id="s-discard">Discard</button><button class="btn primary" id="s-save">Save changes</button></div>
   </div>
 </section>
 
@@ -1276,7 +1286,6 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   let jobs = load('boq.jobs', []);
   let ordCache = null;
   const ord = () => ordCache || (ordCache = BOQ.order(prices));
-  const savePrices = () => { later('prices', () => save('boq.prices', prices)); sync.schedule(); };
   const saveSettings = () => { save('boq.settings', settings); sync.schedule(); };
   const saveSuppliers = () => { save('boq.suppliers', suppliers); fillSupList(); sync.schedule(); };
   const saveJobs = () => { save('boq.jobs', jobs); sync.schedule(); };
@@ -1313,7 +1322,33 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const fill = (id, arr) => { $(id).innerHTML = arr.map(v => '<option value="' + esc(v) + '">').join(''); };
     fill('#dl-cats', [NEWCAT].concat(o.cats)); fill('#dl-subs', [NEWSUB].concat(subs)); fill('#dl-units', units);
   }
-  function pricesChanged() { ordCache = null; savePrices(); refreshLists(); }
+  /* ---- staged editing: the Price list and Suppliers tabs only change the saved data when Save is pressed ---- */
+  let pDirty = false, sDirty = false, catMap = {}, subMap = [];
+  const updateBars = () => { $('#p-bar').hidden = !pDirty; $('#s-bar').hidden = !sDirty; };
+  function pricesChanged() { ordCache = null; pDirty = true; updateBars(); refreshLists(); }      // staged: not saved yet
+  function stageSup() { sDirty = true; updateBars(); fillSupList(); }
+  function commitPrices() {
+    const before = prices.length;
+    prices = prices.filter(p => String(p.type || p.desc || '').trim() || String(p.cat || '').trim() && String(p.spec || '').trim());
+    ordCache = null; save('boq.prices', prices);
+    if (Object.keys(catMap).length || subMap.length) {          // keep suppliers and the current job in step with renamed categories
+      suppliers.forEach(x => { x.cats = x.cats.map(c => catMap[c] || c).filter((c, i, a) => a.indexOf(c) === i); });
+      job.lines.forEach(l => { if (catMap[l.cat]) l.cat = catMap[l.cat]; subMap.forEach(m => { if (l.cat === m.cat && l.sub === m.old) l.sub = m.nw; }); });
+      save('boq.suppliers', suppliers); save('boq.job', job); catMap = {}; subMap = [];
+    }
+    pDirty = false; updateBars(); refreshLists(); sync.schedule();
+    return before - prices.length;
+  }
+  function discardPrices() {
+    prices = normPrices(load('boq.prices', clone(window.SEED_PRICES || []))); ordCache = null; catMap = {}; subMap = [];
+    pDirty = false; updateBars(); refreshLists();
+  }
+  function commitSuppliers() {
+    suppliers = suppliers.filter(x => x.name.trim());
+    save('boq.suppliers', suppliers); sDirty = false; updateBars(); fillSupList(); sync.schedule();
+  }
+  function discardSuppliers() { suppliers = normSup(load('boq.suppliers', [])); sDirty = false; updateBars(); fillSupList(); }
+  window.addEventListener('beforeunload', e => { if (pDirty || sDirty) { e.preventDefault(); e.returnValue = ''; } });
 
   /* ---------- tabs ---------- */
   function showTab(name) {
@@ -1326,7 +1361,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (name === 'settings') fillSettings();
     window.scrollTo(0, 0);
   }
-  $('#tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
+  $('#tabs').addEventListener('click', async e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const cur = ($('#tabs .active') || {}).dataset ? $('#tabs .active').dataset.tab : '';
+    if (b.dataset.tab !== cur && ((cur === 'prices' && pDirty) || (cur === 'suppliers' && sDirty))) {
+      const r = await ask('You have unsaved changes in the ' + (cur === 'prices' ? 'Price list' : 'Suppliers') + '.', ['Save and leave', 'Discard changes', 'Stay here']);
+      if (r === 2) return;
+      if (cur === 'prices') { if (r === 0) commitPrices(); else discardPrices(); } else { if (r === 0) commitSuppliers(); else discardSuppliers(); }
+    }
+    showTab(b.dataset.tab);
+  });
+  $('#p-save').onclick = () => { const d = commitPrices(); renderPrices(); if ($('#cat-mgr') && !$('#cat-mgr').hidden) renderCatMgr(); toast('Price list saved' + (d ? ' (' + d + ' empty row' + (d > 1 ? 's' : '') + ' removed)' : '')); };
+  $('#p-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardPrices(); renderPrices(); if (!$('#cat-mgr').hidden) renderCatMgr(); toast('Changes discarded'); } };
+  $('#s-save').onclick = () => { commitSuppliers(); renderSuppliers(); toast('Suppliers saved'); };
+  $('#s-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardSuppliers(); renderSuppliers(); toast('Changes discarded'); } };
 
   /* ---------- BOQ lines ---------- */
   const typeOf = p => p.type || p.desc;
@@ -1679,14 +1727,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#s-view').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { supView = b.dataset.v; renderSuppliers(); } });
   $('#s-add').onclick = () => {
     const fc = $('#s-cat').value, x = { id: uid(), name: '', cats: fc && fc !== '__none' ? [fc] : [], phone: '', email: '', note: '' };
-    suppliers.unshift(x); supView = 'list'; $('#s-search').value = ''; saveSuppliers(); renderSuppliers();
+    suppliers.unshift(x); supView = 'list'; $('#s-search').value = ''; stageSup(); renderSuppliers();
     const i = $('#s-rows tr[data-id="' + x.id + '"] [data-f="name"]'); if (i) { i.focus(); i.scrollIntoView({ block: 'center' }); }
   };
   $('#s-rows').addEventListener('input', e => {
     const t = e.target, f = t.dataset.f; if (!f) return;
     const x = suppliers.find(y => y.id === t.closest('tr').dataset.id); if (!x) return;
     if (f === 'cats') x.cats = t.value.split(',').map(v => v.trim()).filter((v, i, a) => v && a.indexOf(v) === i); else x[f] = t.value;
-    saveSuppliers();
+    stageSup();
   });
   $('#s-rows').addEventListener('change', e => {
     const t = e.target; if (t.dataset.f !== 'name') return;
@@ -1696,7 +1744,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#s-rows').addEventListener('click', async e => {
     const b = e.target.closest('[data-act="sdel"]'); if (!b) return;
     const i = suppliers.findIndex(y => y.id === b.closest('tr').dataset.id), x = suppliers[i];
-    if ((await ask('Delete supplier "' + (x.name || 'this blank supplier') + '" from the list? Jobs already built keep the name.', ['Delete', 'Cancel'])) === 0) { suppliers.splice(i, 1); saveSuppliers(); renderSuppliers(); }
+    if ((await ask('Delete supplier "' + (x.name || 'this blank supplier') + '" from the list? Jobs already built keep the name.', ['Delete', 'Cancel'])) === 0) { suppliers.splice(i, 1); stageSup(); renderSuppliers(); }
   });
 
   /* ---------- price list ---------- */
@@ -1722,6 +1770,37 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     $('#prices').innerHTML = h;
     $('#p-count').textContent = n + ' of ' + prices.length + ' items shown. Categories and sub-categories appear in the BOQ dropdowns in the order they first appear here.';
   }
+  /* ---- manage categories / sub-categories: rename, merge, delete ---- */
+  function renderCatMgr() {
+    const o = ord(), cnt = (c, sb) => prices.filter(p => p.cat === c && (sb == null || p.sub === sb)).length;
+    $('#cat-mgr').innerHTML = '<p class="muted">Rename a category or sub-category by editing its name. Renaming to a name that already exists merges them. Press Save changes to keep your edits.</p>' +
+      (o.cats.map(c => '<div class="cm-cat"><div class="cm-row"><input data-k="cat" data-o="' + esc(c) + '" value="' + esc(c) + '"><span class="hint">' + cnt(c) + ' items</span><button class="iconbtn" data-act="cmdel" data-k="cat" data-o="' + esc(c) + '" title="Delete this category and its items">&#10005;</button></div>' +
+        (o.subs[c] || []).map(sb => '<div class="cm-row sub"><input data-k="sub" data-c="' + esc(c) + '" data-o="' + esc(sb) + '" value="' + esc(sb) + '"><span class="hint">' + cnt(c, sb) + ' items</span><button class="iconbtn" data-act="cmdel" data-k="sub" data-c="' + esc(c) + '" data-o="' + esc(sb) + '" title="Delete this sub-category and its items">&#10005;</button></div>').join('') + '</div>').join('') || '<p class="muted">No categories yet.</p>');
+  }
+  $('#p-cats').onclick = () => { const m = $('#cat-mgr'); m.hidden = !m.hidden; if (!m.hidden) renderCatMgr(); };
+  $('#cat-mgr').addEventListener('change', async e => {
+    const t = e.target, k = t.dataset.k; if (!k) return;
+    const old = t.dataset.o, nw = t.value.trim(), c = t.dataset.c;
+    if (!nw || nw === old) { renderCatMgr(); return; }
+    const exists = k === 'cat' ? ord().cats.indexOf(nw) >= 0 : (ord().subs[c] || []).indexOf(nw) >= 0;
+    if (exists && (await ask('"' + nw + '" already exists. Merge "' + old + '" into it?', ['Merge', 'Cancel'])) !== 0) { renderCatMgr(); return; }
+    if (k === 'cat') {
+      prices.forEach(p => { if (p.cat === old) p.cat = nw; p.also = (p.also || []).map(a => a === old ? nw : a).filter((a, i, arr) => a !== p.cat && arr.indexOf(a) === i); });
+      Object.keys(catMap).forEach(x => { if (catMap[x] === old) catMap[x] = nw; }); catMap[old] = nw;
+    } else {
+      prices.forEach(p => { if (p.cat === c && p.sub === old) p.sub = nw; }); subMap.push({ cat: c, old, nw });
+    }
+    pricesChanged(); renderPrices(); renderCatMgr();
+  });
+  $('#cat-mgr').addEventListener('click', async e => {
+    const b = e.target.closest('[data-act="cmdel"]'); if (!b) return;
+    const k = b.dataset.k, old = b.dataset.o, c = b.dataset.c;
+    const n = prices.filter(p => k === 'cat' ? p.cat === old : (p.cat === c && p.sub === old)).length;
+    if ((await ask('Delete ' + (k === 'cat' ? 'category' : 'sub-category') + ' "' + old + '"' + (n ? ' and its ' + n + ' item' + (n > 1 ? 's' : '') : '') + ' from the price list?\n\nNothing is final until you press Save changes. Jobs already built are not affected.', ['Delete', 'Cancel'])) !== 0) return;
+    if (k === 'cat') { prices = prices.filter(p => p.cat !== old); prices.forEach(p => { p.also = (p.also || []).filter(a => a !== old); }); }
+    else prices = prices.filter(p => !(p.cat === c && p.sub === old));
+    pricesChanged(); renderPrices(); renderCatMgr();
+  });
   $('#p-search').addEventListener('input', () => renderPrices());
   /* Browsers only list datalist options that match the text already typed, so a filled
      Category box shows just one choice. Clear the box while it is focused so every option shows,
@@ -1816,12 +1895,12 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#p-clear').onclick = async () => {
     if (!prices.length) { toast('The price list is already empty'); return; }
     if ((await ask('Delete ALL ' + prices.length + ' items from the price list?\n\nThis cannot be undone. Jobs already built keep their prices. Tip: use Settings > Download backup first if you may want the list back.', ['Yes, delete all items', 'Cancel'])) === 0) {
-      prices = []; pricesChanged(); renderPrices(); toast('Price list cleared. Use + Add item to start a new one.');
+      prices = []; pricesChanged(); commitPrices(); renderPrices(); toast('Price list cleared. Use + Add item to start a new one.');
     }
   };
   $('#p-reset').onclick = async () => {
     if ((await ask('Replace your whole price list with the built-in sample prices? Your own items and rates will be lost.', ['Replace', 'Cancel'])) === 0) {
-      prices = normPrices(clone(window.SEED_PRICES || [])); pricesChanged(); renderPrices(); toast('Sample prices restored');
+      prices = normPrices(clone(window.SEED_PRICES || [])); pricesChanged(); commitPrices(); renderPrices(); toast('Sample prices restored');
     }
   };
   $('#p-export').onclick = async () => {
@@ -1885,7 +1964,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         toast('Merged: ' + upd + ' updated, ' + add + ' added');
       }
       prices.forEach(p => (p.sups || []).forEach(x => ensureSup(x.name, p.cat)));
-      pricesChanged(); renderPrices();
+      saveSuppliers(); pricesChanged(); commitPrices(); renderPrices();
       if (r === 0) toast('Price list replaced (' + prices.length + ' items)');
     } catch (err) { console.error(err); toast('Import failed: ' + err.message); }
   });
@@ -2061,7 +2140,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }
     let chain = Promise.resolve();
     async function doRun() {
-      if (!api) return;
+      if (!api || pDirty || sDirty) return;               // never send or fetch while edits are waiting to be saved
       setStatus('syncing');
       try {
         await push(); await pull();
