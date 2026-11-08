@@ -119,6 +119,8 @@ h3.gh{margin:16px 0 6px;font-size:15px;color:#14233b}
 .cm-cat{margin:10px 0 14px}.cm-row{display:flex;align-items:center;gap:8px;margin:4px 0}.cm-row input{flex:1;max-width:340px}.cm-row.sub{margin-left:28px}.cm-row.sub input{max-width:300px}
 .cat-mgr{max-height:340px;overflow:auto}
 
+.savebar[hidden]{display:none}
+
 </style>
 </head>
 <body>
@@ -258,6 +260,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
         <input type="search" id="s-search" placeholder="Search suppliers...">
         <select id="s-cat"></select>
         <span id="s-view" class="seg"><button data-v="list" class="on">List</button><button data-v="cat">By category</button></span>
+        <button class="btn" id="s-export">Export to Excel</button>
         <button class="btn primary" id="s-add">+ Add supplier</button>
       </div>
     </div>
@@ -1725,6 +1728,28 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#s-search').addEventListener('input', renderSuppliers);
   $('#s-cat').addEventListener('change', renderSuppliers);
   $('#s-view').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { supView = b.dataset.v; renderSuppliers(); } });
+  $('#s-export').onclick = async () => {
+    try {
+      const list = suppliers.filter(x => x.name.trim()).sort((a, b) => a.name.localeCompare(b.name));
+      if (!list.length) { toast('There are no suppliers to export yet'); return; }
+      const wb = new window.ExcelJS.Workbook();
+      const style = ws => {
+        ws.getRow(1).eachCell(c => { c.font = { name: 'Arial', bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F3864' } }; });
+        ws.eachRow((r, n) => { if (n > 1) r.eachCell(c => { c.font = { name: 'Arial', size: 10 }; c.alignment = { vertical: 'top', wrapText: true }; }); });
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+      };
+      const w1 = wb.addWorksheet('Suppliers');
+      w1.columns = [{ header: 'Supplier', width: 34 }, { header: 'Categories', width: 40 }, { header: 'Phone', width: 18 }, { header: 'Email', width: 30 }, { header: 'Notes', width: 40 }];
+      list.forEach(x => w1.addRow([x.name, x.cats.join(', '), x.phone, x.email, x.note])); style(w1); w1.autoFilter = { from: 'A1', to: 'E1' };
+      const w2 = wb.addWorksheet('By category');
+      w2.columns = [{ header: 'Category', width: 26 }, { header: 'Supplier', width: 34 }, { header: 'Phone', width: 18 }, { header: 'Email', width: 30 }, { header: 'Notes', width: 40 }];
+      const order = supCats().concat(['']);
+      order.forEach(c => list.filter(x => c ? x.cats.indexOf(c) >= 0 : !x.cats.length).forEach(x => w2.addRow([c || 'No category', x.name, x.phone, x.email, x.note])));
+      style(w2); w2.autoFilter = { from: 'A1', to: 'E1' };
+      const buf = await wb.xlsx.writeBuffer();
+      download(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'Suppliers_' + today() + '.xlsx');
+    } catch (err) { console.error(err); toast('Export failed: ' + err.message); }
+  };
   $('#s-add').onclick = () => {
     const fc = $('#s-cat').value, x = { id: uid(), name: '', cats: fc && fc !== '__none' ? [fc] : [], phone: '', email: '', note: '' };
     suppliers.unshift(x); supView = 'list'; $('#s-search').value = ''; stageSup(); renderSuppliers();
