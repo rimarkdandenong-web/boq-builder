@@ -128,6 +128,31 @@ h3.gh{margin:16px 0 6px;font-size:15px;color:#14233b}
 
 .dbmode #p-reset{display:none}
 
+/* ---- audit fixes ---- */
+.jstate{font-size:12px;font-weight:600;margin-left:10px;padding:2px 8px;border-radius:10px}
+.jstate.ok{background:#e3f4e8;color:#1b6b34}.jstate.warn{background:#fff1d6;color:#8a5a00}
+tr.inc td{background:#fff4f2}tr.inc td:first-child{box-shadow:inset 3px 0 #c0392b}
+.warnbox{background:#fff4f2;border:1px solid #e3b4ad;color:#8c2a1e;padding:8px 10px;border-radius:6px;margin:8px 0;font-size:13px}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #1d4f91;outline-offset:2px}
+.iconbtn{min-width:34px;min-height:34px;padding:6px 8px}
+td input[data-f=qty],td input[data-f=rate]{min-width:84px}
+@media (max-width:700px){
+  nav#tabs{overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  nav#tabs button{white-space:nowrap;min-height:44px}
+  .btn{min-height:44px}.iconbtn{min-width:44px;min-height:44px}
+  #lines,#lines tr,#lines td{display:block;width:100%}
+  #lines tr{border:1px solid #d5dbe3;border-radius:8px;margin:10px 0;padding:6px 10px;background:#fff}
+  #lines td{border:0;padding:4px 0}
+  #lines td[data-l]::before{content:attr(data-l);display:block;font-size:11px;color:#5a6676;margin-bottom:2px}
+  #lines td.n{font-weight:700}
+  #lines td .iconbtn{margin-right:6px}
+  #lines td input,#lines td select{width:100%}
+  table.lines thead{display:none}
+}
+
+#modal-msg{white-space:pre-line}
+.help-d summary{cursor:pointer;font-weight:600;color:#1d4f91;min-height:32px}
+
 </style>
 </head>
 <body>
@@ -138,7 +163,7 @@ if(!H||H.indexOf('__')===0)return;
 function h(s){var a=0xdeadbeef,b=0x41c6ce57;for(var i=0;i<s.length;i++){var c=s.charCodeAt(i);a=Math.imul(a^c,2654435761);b=Math.imul(b^c,1597334677)}
 a=Math.imul(a^(a>>>16),2246822507)^Math.imul(b^(b>>>13),3266489909);b=Math.imul(b^(b>>>16),2246822507)^Math.imul(a^(a>>>13),3266489909);
 return String(4294967296*(2097151&b)+(a>>>0))}
-var ok=false;try{ok=localStorage.getItem('boq.pass')===H}catch(e){}
+var ok=false;try{var pc=sessionStorage.getItem('boq.pc');if(pc&&h(pc)===H){window.__PC=pc;ok=true}}catch(e){}
 if(ok)return;
 var d=document.createElement('div');
 d.id='gate';
@@ -148,7 +173,7 @@ document.body.appendChild(d);
 var f=d.querySelector('form'),i=d.querySelector('input');
 setTimeout(function(){i.focus()},50);
 f.onsubmit=function(e){e.preventDefault();
-if(h(i.value.trim())===H){try{localStorage.setItem('boq.pass',H)}catch(x){}d.remove()}
+if(h(i.value.trim())===H){window.__PC=i.value.trim();try{sessionStorage.setItem('boq.pc',window.__PC)}catch(x){}d.remove()}
 else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}};
 })();
 </script>
@@ -156,7 +181,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
 <header class="top">
   <div class="brand"><span class="logo">BOQ</span> Builder</div>
   <button id="sync-chip" class="chip" data-state="local">Local only</button>
-  <nav id="tabs">
+  <nav id="tabs" role="tablist" aria-label="Sections">
     <button data-tab="boq" class="active">BOQ</button>
     <button data-tab="jobs">Saved jobs</button>
     <button data-tab="prices">Price list</button>
@@ -171,7 +196,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
 <section id="tab-boq" class="tab">
   <div class="card">
     <div class="card-h">
-      <h2>Job details</h2>
+      <h2>Job details</h2><span id="job-state" class="jstate" role="status" aria-live="polite"></span>
       <div class="btns">
         <button class="btn" id="btn-new">New job</button>
         <button class="btn" id="btn-save">Save job</button>
@@ -184,7 +209,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
       <label>Date<input type="date" data-job="date"></label>
       <label><span>Quote ref <b class="req">*</b></span><input data-job="ref"></label>
       <label>RFQ No:<input data-job="rfq"></label>
-      <label><span>Prepared by <b class="req">*</b></span><input data-job="by"></label>
+      <label><span>Prepared by <b class="req">*</b></span><input data-job="by" list="dl-by" autocomplete="off"></label>
     </div>
   </div>
 
@@ -219,7 +244,8 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
 <!-- ============ JOBS ============ -->
 <section id="tab-jobs" class="tab" hidden>
   <div class="card">
-    <div class="card-h"><h2>Saved jobs</h2><span class="hint">Click "Save job" on the BOQ tab to keep a job here. Totals use the current markup and GST settings.</span></div>
+    <div class="card-h"><h2>Saved jobs</h2><span class="hint">Jobs are saved to the database automatically a few seconds after you fill in Project, Quote ref and Prepared by. Totals use the current markup and GST settings.</span></div>
+    <div class="pad"><input type="search" id="j-search" placeholder="Search by project, quote ref, client or prepared by" aria-label="Search saved jobs" style="width:100%;max-width:420px"></div>
     <div class="twrap"><table class="plain">
       <thead><tr><th>Project</th><th>Quote ref</th><th>Client</th><th>Date</th><th class="r">Lines</th><th class="r">Total incl. GST</th><th></th></tr></thead>
       <tbody id="jobs"></tbody>
@@ -237,7 +263,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
         <button class="btn primary" id="p-add">+ Add item</button>
       </div>
     </div>
-    <p class="muted pad">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item, open the Category (or Sub-category) list and choose the first entry, Add new category, then type the new name. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built. Your edits are not saved until you press Save changes.</p>
+    <details class="pad help-d"><summary>How this list works</summary><p class="muted">This is your master list. Every row is one exact item: an Item type (for example Galvanised flat head nail) plus Spec 1 (for example 75mm, or a size like 200x75) and, where needed, Spec 2 (for example the length 2.4m). Each combination has its own unit and rate. Leave the specs blank for items that come in one size. Sub-category is only a heading that groups items in the list and on the printed BOQ. To add a new category or sub-category, press + Add item, open the Category (or Sub-category) list and choose the first entry, Add new category, then type the new name. Use the + at the end of a row to add another size under the same item. Rates exclude GST. Changing a rate here affects new BOQ lines only, not jobs already built. Your edits are not saved until you press Save changes.</p></details>
     <div class="btns pad">
       <button class="btn" id="p-import">Import from Excel</button>
       <button class="btn" id="p-export">Export to Excel</button>
@@ -327,11 +353,11 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
   <div class="card">
     <div class="card-h"><h2>How it works</h2></div>
     <ol class="help">
-      <li><b>Price list</b>: enter every item with its unit (m, m&sup2;, m&sup3;, kg, tonne, box, each, hour...) and rate. Use Category and Sub-category to organise (for example Fencing &gt; Nails and Fixings &gt; Galvanised nail 75mm).</li>
-      <li><b>Items used in several categories</b> (nails, screws, concrete...): keep one row with one rate, and type the other categories in the "Also used in" column (for example Decking, Gardening). The item then appears in each of those categories, and on the BOQ it is listed under whichever category you picked.</li>
-      <li><b>BOQ</b>: for each line choose Category, Item, Spec (and Spec 2 where it appears), then type the quantity. The unit and rate come from the price list.</li>
-      <li><b>Export</b>: download an Excel file (with live formulas) or a PDF for the client.</li>
-      <li><b>Save job</b> keeps the BOQ in the Saved jobs tab. Prices are copied into the job, so later price changes do not alter old quotes.</li>
+      <li><b>Everything is stored in the shared database</b> (the Google Sheet). This browser keeps nothing, and everyone with the link and passcode sees the same price list, suppliers and saved jobs.</li>
+      <li><b>Price list / Suppliers</b>: add or edit freely, then press <b>Save changes</b>. Use <b>Discard</b> to throw the edits away. Items can have several suppliers, each with its own rate.</li>
+      <li><b>BOQ</b>: fill in Project, Quote ref and Prepared by, then add lines (Category, Item, Spec, quantity). Red-edged lines are incomplete and are left out of the total and the exports.</li>
+      <li><b>Saved jobs</b>: a job is saved to the database automatically a few seconds after you stop typing (the badge by "Job details" shows the status). Prices are copied into the job, so later price changes do not alter old quotes.</li>
+      <li><b>Export</b>: Excel (live formulas) or PDF for the client. The Excel file also has an internal Suppliers sheet unless Client mode is on.</li>
     </ol>
   </div>
 </section>
@@ -339,8 +365,8 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
 
 <div id="toast" class="toast" hidden></div>
 <div id="boot" class="boot" hidden><div class="box"><p id="boot-msg">Loading the shared data...</p><button class="btn primary" id="boot-retry" hidden>Try again</button></div></div>
-<div id="modal" class="modal" hidden><div class="box"><p id="modal-msg"></p><div class="btns" id="modal-btns"></div></div></div>
-<datalist id="dl-sup"></datalist><datalist id="dl-cats"></datalist><datalist id="dl-types"></datalist><datalist id="dl-specs"></datalist><datalist id="dl-spec2s"></datalist><datalist id="dl-subs"></datalist><datalist id="dl-units"></datalist>
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-msg"><div class="box"><p id="modal-msg"></p><div class="btns" id="modal-btns"></div></div></div>
+<datalist id="dl-by"></datalist><datalist id="dl-sup"></datalist><datalist id="dl-cats"></datalist><datalist id="dl-types"></datalist><datalist id="dl-specs"></datalist><datalist id="dl-spec2s"></datalist><datalist id="dl-subs"></datalist><datalist id="dl-units"></datalist>
 
 <script>
 /** @license
@@ -1307,24 +1333,55 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   const saveSettings = () => { save('boq.settings', settings); sync.schedule(); };
   const saveSuppliers = () => { save('boq.suppliers', suppliers); fillSupList(); sync.schedule(); };
   const saveJobs = () => { save('boq.jobs', jobs); sync.schedule(); };
-  const saveJobDraft = () => later('job', () => save('boq.job', job));
+  const jobReady = () => Object.keys(REQ).every(k => String(job[k] || '').trim()) && job.lines.some(l => l.desc);
+  function autoSaveJob() {
+    if (!DB || !jobReady() || jobIsSaved()) return;
+    const c = clone(job); c.saved = Date.now();
+    const i = jobs.findIndex(j => j.id === job.id);
+    if (i >= 0) jobs[i] = c; else jobs.unshift(c);
+    saveJobs(); updateJobState(true);
+  }
+  const saveJobDraft = () => { later('job', () => save('boq.job', job)); later('autojob', autoSaveJob, 4000); updateJobState(); };
+  function jobIsSaved() {
+    const sv = jobs.find(j => j.id === job.id); if (!sv) return false;
+    const a = Object.assign({}, job), b = Object.assign({}, sv); delete a.saved; delete b.saved;
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  function updateJobState(auto) {
+    const el = $('#job-state'); if (!el) return;
+    if (!hasContent()) { el.textContent = ''; el.className = 'jstate'; return; }
+    const ok = jobIsSaved(); el.textContent = ok ? (auto ? 'Auto-saved' : 'All changes saved') : (DB && !jobReady() ? 'Not saved yet - fill Project, Quote ref and Prepared by to auto-save' : 'Not saved yet'); el.className = 'jstate ' + (ok ? 'ok' : 'warn');
+  }
 
   /* ---------- ui helpers ---------- */
   let toastT;
   function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 3200); }
+  let modalDone = null, modalOpener = null;
   function ask(msg, buttons) {
     return new Promise(res => {
       $('#modal-msg').textContent = msg;
       const b = $('#modal-btns'); b.innerHTML = '';
+      modalOpener = document.activeElement;
+      const close = i => { $('#modal').hidden = true; modalDone = null; if (modalOpener && modalOpener.focus) { try { modalOpener.focus(); } catch (e) {} } res(i); };
+      modalDone = () => close(buttons.length > 1 ? 0 : 0);          // Escape = the safe first choice
       buttons.forEach((t, i) => {
         const el = document.createElement('button');
         el.className = 'btn' + (i === 0 ? ' primary' : ''); el.textContent = t;
-        el.onclick = () => { $('#modal').hidden = true; res(i); };
+        el.onclick = () => close(i);
         b.appendChild(el);
       });
       $('#modal').hidden = false; b.firstChild.focus();
     });
   }
+  document.addEventListener('keydown', e => {
+    if ($('#modal').hidden) return;
+    if (e.key === 'Escape' && modalDone) { e.preventDefault(); modalDone(); }
+    if (e.key === 'Tab') {                                           // keep focus inside the dialog
+      const bs = $$('#modal-btns button'); if (!bs.length) return;
+      const i = bs.indexOf ? bs.indexOf(document.activeElement) : Array.prototype.indexOf.call(bs, document.activeElement);
+      e.preventDefault(); bs[(i + (e.shiftKey ? bs.length - 1 : 1)) % bs.length].focus();
+    }
+  });
   function download(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1406,7 +1463,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }
     showTab(b.dataset.tab);
   });
-  $('#p-save').onclick = async () => { const d = commitPrices(); renderPrices(); if ($('#cat-mgr') && !$('#cat-mgr').hidden) renderCatMgr(); await writeDb('Price list saved' + (d ? ' (' + d + ' empty row' + (d > 1 ? 's' : '') + ' removed)' : '')); };
+  $('#p-save').onclick = async () => {
+    const seen = {}, dups = [];
+    prices.forEach(p => { if (!p.desc) return; const k = [p.cat, p.sub, p.desc, p.spec, p.spec2].map(x => String(x || '').trim().toLowerCase()).join('|'); if (seen[k]) dups.push(p.desc + (p.spec ? ' ' + p.spec : '') + (p.spec2 ? ' ' + p.spec2 : '')); seen[k] = 1; });
+    if (dups.length && (await ask('These items appear more than once with the same category and specs:\n\n' + dups.slice(0, 6).join('\n') + (dups.length > 6 ? '\n...and ' + (dups.length - 6) + ' more' : '') + '\n\nSave anyway?', ['Go back and fix', 'Save anyway'])) !== 1) return;
+    const d = commitPrices(); renderPrices(); if ($('#cat-mgr') && !$('#cat-mgr').hidden) renderCatMgr(); await writeDb('Price list saved' + (d ? ' (' + d + ' empty row' + (d > 1 ? 's' : '') + ' removed)' : '')); };
   $('#p-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardPrices(); renderPrices(); if (!$('#cat-mgr').hidden) renderCatMgr(); toast('Changes discarded'); } };
   $('#s-save').onclick = async () => { commitSuppliers(); renderSuppliers(); await writeDb('Suppliers saved'); };
   $('#s-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardSuppliers(); renderSuppliers(); toast('Changes discarded'); } };
@@ -1486,29 +1547,34 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const lp = listPrice(l);
     const over = !l.custom && lp && Math.abs(expRate(lp, l) - (+l.rate || 0)) > 1e-9;
     const rateOn = l.custom || l.desc;
-    return '<td class="n">' + (idx + 1) + '</td><td>' + catSel + '</td><td>' + item + '</td><td>' + specCell + '</td><td>' + spec2Cell + '</td>' +
-      '<td class="sup">' + lineChips(l, listPrice(l)) + '</td>' +
-      '<td><input type="number" step="any" min="0" data-f="qty" value="' + esc(l.qty) + '"></td>' +
-      '<td class="unit">' + unit + '</td>' +
-      '<td><input type="number" step="any" min="0" data-f="rate" class="' + (over ? 'over' : '') + '" title="' + (over ? 'Differs from price list (' + money(expRate(lp, l)) + ')' : '') + '" value="' + (rateOn ? esc(l.rate) : '') + '"' + (rateOn ? '' : ' disabled') + '></td>' +
-      '<td class="amt">' + amountText(l) + '</td>' +
-      '<td><button class="iconbtn" data-act="dup" title="Duplicate line">&#10697;</button><button class="iconbtn" data-act="del" title="Delete line">&#10005;</button></td>';
+    return '<td class="n">' + (idx + 1) + '</td><td data-l="Category">' + catSel + '</td><td data-l="Item">' + item + '</td><td data-l="Spec">' + specCell + '</td><td data-l="Spec 2">' + spec2Cell + '</td>' +
+      '<td class="sup" data-l="Supplier(s)">' + lineChips(l, listPrice(l)) + '</td>' +
+      '<td data-l="Qty"><input type="number" step="any" min="0" data-f="qty" value="' + esc(l.qty) + '"></td>' +
+      '<td class="unit" data-l="Unit">' + unit + '</td>' +
+      '<td data-l="Rate ($)"><input type="number" step="any" min="0" data-f="rate" class="' + (over ? 'over' : '') + '" title="' + (over ? 'Differs from price list (' + money(expRate(lp, l)) + ')' : '') + '" value="' + (rateOn ? esc(l.rate) : '') + '"' + (rateOn ? '' : ' disabled') + '></td>' +
+      '<td class="amt" data-l="Amount ($)">' + amountText(l) + '</td>' +
+      '<td class="acts"><button class="iconbtn" data-act="dup" title="Duplicate line" aria-label="Duplicate line">&#10697;</button><button class="iconbtn" data-act="del" title="Delete line" aria-label="Delete line">&#10005;</button></td>';
   }
   const amountText = l => (+l.qty > 0 && l.desc) ? money(BOQ.r2((+l.qty) * (+l.rate || 0))) : '';
 
+  /* give every control an accessible name taken from its column heading */
+  function labelCells(root) {
+    $$('td[data-l]', root).forEach(td => { const c = $('input,select', td); if (c && !c.getAttribute('aria-label')) c.setAttribute('aria-label', td.dataset.l); });
+  }
   function renderLines() {
     $('#lines').innerHTML = job.lines.map((l, i) => '<tr data-id="' + l.id + '">' + rowInner(l, i) + '</tr>').join('');
+    labelCells($('#lines'));
   }
   function renderRow(id, focusField) {
     const i = job.lines.findIndex(x => x.id === id); if (i < 0) return;
     const tr = $('#lines tr[data-id="' + id + '"]');
-    tr.innerHTML = rowInner(job.lines[i], i);
+    tr.innerHTML = rowInner(job.lines[i], i); labelCells(tr);
     if (focusField) { const f = $('[data-f="' + focusField + '"]', tr); if (f && !f.disabled) f.focus(); }
   }
   function addLine(focus) {
     const l = newLine(); job.lines.push(l);
     const tr = document.createElement('tr'); tr.dataset.id = l.id;
-    tr.innerHTML = rowInner(l, job.lines.length - 1);
+    tr.innerHTML = rowInner(l, job.lines.length - 1); labelCells(tr);
     $('#lines').appendChild(tr);
     if (focus) { $('[data-f="cat"]', tr).focus(); tr.scrollIntoView({ block: 'nearest' }); }
     saveJobDraft();
@@ -1620,10 +1686,14 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   });
 
   /* ---------- totals ---------- */
+  const incompleteLine = l => (+l.qty > 0 && !(l.desc && +l.rate > 0)) || (!!l.desc && !(+l.qty > 0));
   function renderTotals() {
     const m = BOQ.buildModel(job, settings, { order: ord() }), S = m.summary;
+    const notPriced = job.lines.filter(l => +l.qty > 0 && !(l.desc && +l.rate > 0)).length;
+    $$('#lines tr').forEach(tr => { const l = job.lines.find(x => x.id === tr.dataset.id); tr.classList.toggle('inc', !!l && incompleteLine(l)); });
     const incomplete = job.lines.filter(l => l.desc && !(+l.qty > 0)).length;
-    let h = '<div class="card-h"><h2>Summary</h2><span class="hint">' + m.count + ' line(s) priced' + (incomplete ? ' - ' + incomplete + ' without a quantity' : '') + '</span></div><table class="sum">';
+    let h = '<div class="card-h"><h2>Summary</h2><span class="hint">' + m.count + ' line(s) priced' + (incomplete ? ' - ' + incomplete + ' without a quantity' : '') + '</span></div>' +
+      (notPriced ? '<p class="warnbox" role="alert"><b>' + notPriced + ' line' + (notPriced > 1 ? 's have' : ' has') + ' a quantity but no complete item or rate, so ' + (notPriced > 1 ? 'they are' : 'it is') + ' NOT in this total.</b> Finish choosing the item and spec (the red-edged lines).</p>' : '') + '<table class="sum">';
     m.sections.forEach(s => { h += '<tr><td>' + s.no + '. ' + esc(s.cat) + '</td><td></td><td>' + money(s.total) + '</td></tr>'; });
     if (!m.sections.length) h += '<tr><td colspan="3" class="muted">Add items with a quantity to see totals.</td></tr>';
     h += '<tr class="sub"><td>Subtotal</td><td></td><td>' + money(S.subtotal) + '</td></tr>';
@@ -1636,7 +1706,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
 
   /* ---------- job fields ---------- */
-  function fillJob() { $$('[data-job]').forEach(i => { i.value = job[i.dataset.job] || ''; }); }
+  function fillBy() { const names = []; jobs.forEach(j => { const n = String(j.by || '').trim(); if (n && names.indexOf(n) < 0) names.push(n); }); $('#dl-by').innerHTML = names.map(n => '<option value="' + esc(n) + '">').join(''); }
+  function fillJob() { fillBy(); $$('[data-job]').forEach(i => { i.value = job[i.dataset.job] || ''; }); }
   $$('[data-job]').forEach(i => i.addEventListener('input', () => { job[i.dataset.job] = i.value; saveJobDraft(); }));
 
   const strip = j => { const c = clone(j); delete c.saved; return JSON.stringify(c); };
@@ -1663,7 +1734,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const i = jobs.findIndex(j => j.id === job.id);
     if (i >= 0) jobs[i] = c; else jobs.unshift(c);
     saveJobs(); save('boq.job', job);
-    writeDb('Job saved');
+    const dup = jobs.find(j => j.id !== job.id && String(j.ref || '').trim().toLowerCase() === String(job.ref || '').trim().toLowerCase());
+    writeDb('Job saved').then(() => { if (dup) toast('Note: Quote ref "' + job.ref + '" is also used by "' + (dup.project || 'Untitled') + '". Check it is not a mistake.'); }); updateJobState();
     return true;
   }
   async function guard() {
@@ -1676,21 +1748,23 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   function loadJob(j) {
     job = clone(j); delete job.saved; if (!job.lines || !job.lines.length) job.lines = [newLine()];
-    save('boq.job', job); fillJob(); renderLines(); renderTotals();
+    save('boq.job', job); fillJob(); renderLines(); renderTotals(); updateJobState();
   }
   $('#btn-save').onclick = saveJob;
   $('#btn-new').onclick = async () => { if (await guard()) { loadJob(newJob()); toast('New job started'); } };
 
   /* ---------- exports ---------- */
-  function exportOK() {
+  async function exportOK() {
     if (!needJob()) return false;
     const m = BOQ.buildModel(job, settings, { order: ord() });
     if (!m.count) { toast('Add at least one item with a quantity first.'); return false; }
+    const bad = job.lines.filter(l => +l.qty > 0 && !(l.desc && +l.rate > 0)).length;
+    if (bad && (await ask(bad + ' line' + (bad > 1 ? 's are' : ' is') + ' incomplete (no complete item or rate) and will be LEFT OUT of the file.\n\nExport anyway?', ['Go back and finish', 'Export anyway'])) !== 1) return false;
     return true;
   }
   const exOpts = () => ({ client: !!settings.clientMode, order: ord() });
   $('#btn-xlsx').onclick = async () => {
-    if (!exportOK()) return;
+    if (!(await exportOK())) return;
     try {
       const wb = BOQ.makeXlsx(window.ExcelJS, job, settings, exOpts());
       const buf = await wb.xlsx.writeBuffer();
@@ -1698,8 +1772,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       toast('Excel file downloaded');
     } catch (err) { console.error(err); toast('Excel export failed: ' + err.message); }
   };
-  $('#btn-pdf').onclick = () => {
-    if (!exportOK()) return;
+  $('#btn-pdf').onclick = async () => {
+    if (!(await exportOK())) return;
     try {
       const doc = BOQ.makePdf(window.jspdf.jsPDF, job, settings, exOpts());
       doc.save(BOQ.fileName(job, 'pdf'));
@@ -1711,12 +1785,16 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   /* ---------- saved jobs ---------- */
   function renderJobs() {
     $('#jobs-empty').hidden = jobs.length > 0;
+    fillBy();
+    const q = ($('#j-search').value || '').trim().toLowerCase();
     $('#jobs').innerHTML = jobs.map((j, i) => {
+      if (q && [j.project, j.ref, j.client, j.by].join(' ').toLowerCase().indexOf(q) < 0) return '';
       const m = BOQ.buildModel(j, settings, { order: ord() });
       return '<tr data-i="' + i + '"><td>' + esc(j.project || 'Untitled') + (j.id === job.id ? ' <span class="hint">(open)</span>' : '') + '</td><td>' + esc(j.ref) + '</td><td>' + esc(j.client) + '</td><td>' + esc(BOQ.date(j.date)) + '</td><td class="r">' + m.count + '</td><td class="r">' + money(m.summary.total) +
         '</td><td class="r"><button class="btn" data-act="open">Open</button> <button class="btn" data-act="dupjob">Duplicate</button> <button class="btn danger" data-act="deljob">Delete</button></td></tr>';
     }).join('');
   }
+  $('#j-search').addEventListener('input', renderJobs);
   $('#jobs').addEventListener('click', async e => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     const i = +b.closest('tr').dataset.i, j = jobs[i];
@@ -2118,7 +2196,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (txt) txt.textContent = api ? (label + (lastErr ? ' (' + lastErr + ')' : '')) : 'Not connected - this computer keeps its own data.';
     }
     async function call(method, qs, body) {
-      const url = api + (method === 'GET' ? (api.indexOf('?') >= 0 ? '&' : '?') + qs : '');
+      const key = window.__PC || '';
+      const url = api + (method === 'GET' ? (api.indexOf('?') >= 0 ? '&' : '?') + qs + '&key=' + encodeURIComponent(key) : '');
+      if (method !== 'GET') body = Object.assign({ key }, body);
       const res = await window.fetch(url, method === 'GET' ? { method: 'GET', redirect: 'follow' } : { method: 'POST', redirect: 'follow', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
       const r = await res.json();
       if (!r || !r.ok) throw new Error((r && r.error) || 'Bad reply from shared storage');
