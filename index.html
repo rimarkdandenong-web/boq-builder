@@ -121,6 +121,11 @@ h3.gh{margin:16px 0 6px;font-size:15px;color:#14233b}
 
 .savebar[hidden]{display:none}
 
+.dbmode #card-sync{display:none}
+.boot{position:fixed;inset:0;z-index:9000;background:#14233b;display:flex;align-items:center;justify-content:center;padding:16px}
+.boot[hidden]{display:none}
+.boot .box{background:#fff;border-radius:12px;padding:28px;text-align:center;max-width:340px;width:100%}
+
 </style>
 </head>
 <body>
@@ -297,7 +302,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
     </div>
     <p class="muted pad">Markup and contingency are applied to the subtotal of all items. GST is applied after.</p>
   </div>
-  <div class="card">
+  <div class="card" id="card-sync">
     <div class="card-h"><h2>Shared storage (everyone uses the same data)</h2></div>
     <p class="muted pad">The price list, suppliers, saved jobs and company settings live in one shared Google database. When this app has the database link built in, every browser connects to it automatically and nobody needs to do anything here. Otherwise paste the web app link from your Google Apps Script (ends in /exec). <span id="sync-text"></span></p>
     <div class="grid"><label class="span2">Apps Script web app link<input id="sync-url" placeholder="https://script.google.com/macros/s/.../exec"></label></div>
@@ -330,6 +335,7 @@ else{d.querySelector('#gerr').textContent='Wrong passcode';i.value='';i.focus()}
 </main>
 
 <div id="toast" class="toast" hidden></div>
+<div id="boot" class="boot" hidden><div class="box"><p id="boot-msg">Loading the shared data...</p><button class="btn primary" id="boot-retry" hidden>Try again</button></div></div>
 <div id="modal" class="modal" hidden><div class="box"><p id="modal-msg"></p><div class="btns" id="modal-btns"></div></div></div>
 <datalist id="dl-sup"></datalist><datalist id="dl-cats"></datalist><datalist id="dl-types"></datalist><datalist id="dl-specs"></datalist><datalist id="dl-spec2s"></datalist><datalist id="dl-subs"></datalist><datalist id="dl-units"></datalist>
 
@@ -1231,8 +1237,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 
   /* ---------- storage ---------- */
-  function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { $('#warn').hidden = false; return d; } }
-  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { $('#warn').hidden = false; } }
+  // Database mode (the app has the shared database link built in): the browser holds no data at all.
+  // Everything is loaded from the shared Google database when the page opens and sent back when saved.
+  const DB = !!window.SYNC_URL;
+  const store = DB ? { getItem: () => null, setItem: () => {}, removeItem: () => {} } : localStorage;
+  if (DB) document.body.classList.add('dbmode');
+  function load(k, d) { try { const v = store.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { $('#warn').hidden = false; return d; } }
+  function save(k, v) { try { store.setItem(k, JSON.stringify(v)); } catch (e) { $('#warn').hidden = false; } }
   const timers = {};
   function later(k, fn, ms) { clearTimeout(timers[k]); timers[k] = setTimeout(fn, ms || 250); }
 
@@ -1282,7 +1293,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     phone: String(x.phone || ''), email: String(x.email || ''), note: String(x.note || '')
   }));
   let suppliers = normSup(load('boq.suppliers', []));
-  let prices = normPrices(load('boq.prices', clone(window.SEED_PRICES || [])));
+  let prices = normPrices(load('boq.prices', DB ? [] : clone(window.SEED_PRICES || [])));
   let settings = Object.assign({}, DEFAULTS, load('boq.settings', {}));
   if (['Your Company Name', 'Enerfab Engineering Services'].indexOf(settings.company) >= 0) Object.assign(settings, { company: DEFAULTS.company, details: settings.details || DEFAULTS.details, logo: DEFAULTS.logo, logoW: DEFAULTS.logoW, logoH: DEFAULTS.logoH });
   let job = load('boq.job', null) || newJob();
@@ -1352,7 +1363,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     save('boq.suppliers', suppliers); sDirty = false; updateBars(); fillSupList(); sync.schedule();
   }
   function discardSuppliers() { suppliers = normSup(load('boq.suppliers', [])); sDirty = false; updateBars(); fillSupList(); }
-  window.addEventListener('beforeunload', e => { if (pDirty || sDirty) { e.preventDefault(); e.returnValue = ''; } });
+  const jobUnsaved = () => {
+    if (!DB || !hasContent()) return false;
+    const sv = jobs.find(j => j.id === job.id); if (!sv) return true;
+    const a = Object.assign({}, job), b = Object.assign({}, sv); delete a.saved; delete b.saved;
+    return JSON.stringify(a) !== JSON.stringify(b);
+  };
+  window.addEventListener('beforeunload', e => { if (pDirty || sDirty || jobUnsaved()) { e.preventDefault(); e.returnValue = ''; } });
 
   /* ---------- tabs ---------- */
   function showTab(name) {
@@ -2057,7 +2074,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     const snap = { prices: {}, jobs: {}, suppliers: {}, settings: '' };      // what the server is known to hold (JSON strings)
     let api = '', since = 0, pushT = null, pollT = null, status = 'local', lastOk = 0, lastErr = '';
     const H = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36) + '.' + s.length; };
-    const saveSnap = () => { try { localStorage.setItem('boq.snap', JSON.stringify({ api, prices: snap.prices, jobs: snap.jobs, suppliers: snap.suppliers, settings: snap.settings })); } catch (e) { /* ignore */ } };
+    const saveSnap = () => { try { store.setItem('boq.snap', JSON.stringify({ api, prices: snap.prices, jobs: snap.jobs, suppliers: snap.suppliers, settings: snap.settings })); } catch (e) { /* ignore */ } };
     const canonSup = x => JSON.stringify(normSup([x])[0]);
     const canonP = p => JSON.stringify(normPrices([p])[0]);
     const canonS = () => JSON.stringify(SET_KEYS.map(k => settings[k]));
@@ -2199,36 +2216,44 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       try {
         const r = await call('GET', 'action=list&since=0');
         const hasPrices = r.docs.some(d => d.c === 'prices' && !d.del);
-        let hadLocal = false; try { hadLocal = !!localStorage.getItem('boq.prices'); } catch (e) { /* ignore */ }
+        let hadLocal = false; try { hadLocal = !!store.getItem('boq.prices'); } catch (e) { /* ignore */ }
         const mineP = prices.slice(), mineS = suppliers.slice();
         snap.prices = {}; snap.jobs = {}; snap.suppliers = {}; snap.settings = '';
         if (!hasPrices) {
+          if (DB && !prices.length) prices = normPrices(clone(window.SEED_PRICES || []));     // brand-new database: start it with the sample list
           applyRemote(r.docs.filter(d => d.c !== 'prices'), true);      // database is empty: this browser's list starts it
         } else {
           applyRemote(r.docs, true);                                     // the database always wins
           if (hadLocal) migrateLocal(mineP, mineS);                      // one time: carry over anything this browser had changed
         }
         since = Math.max(0, r.now - 1500);
-        try { localStorage.setItem('boq.api', api); localStorage.removeItem('boq.noauto'); } catch (e) { /* ignore */ }
+        try { store.setItem('boq.api', api); store.removeItem('boq.noauto'); } catch (e) { /* ignore */ }
         refreshUi(); startPolling();
         await push(); lastOk = Date.now(); setStatus('ok'); saveSnap();
         return true;
       } catch (e) { setStatus('error', String(e.message || e)); toast('Could not connect: ' + (e.message || e)); return false; }
     }
-    function disconnect() { try { localStorage.setItem('boq.noauto', '1'); } catch (e) { /* ignore */ } api = ''; clearInterval(pollT); clearTimeout(pushT); try { localStorage.removeItem('boq.api'); } catch (e) { /* ignore */ } snap.prices = {}; snap.jobs = {}; snap.suppliers = {}; snap.settings = ''; setStatus('local'); }
+    function disconnect() { try { store.setItem('boq.noauto', '1'); } catch (e) { /* ignore */ } api = ''; clearInterval(pollT); clearTimeout(pushT); try { store.removeItem('boq.api'); } catch (e) { /* ignore */ } snap.prices = {}; snap.jobs = {}; snap.suppliers = {}; snap.settings = ''; setStatus('local'); }
+    async function bootDb() {
+      $('#boot').hidden = false; $('#boot-msg').textContent = 'Loading the shared data...'; $('#boot-retry').hidden = true;
+      const ok = await connect(window.SYNC_URL, { auto: true });
+      if (ok) { $('#boot').hidden = true; return; }
+      $('#boot-msg').textContent = 'Could not reach the shared database. Check the internet connection and try again.'; $('#boot-retry').hidden = false;
+    }
     async function init() {
+      if (DB) { $('#boot-retry').onclick = bootDb; return bootDb(); }
       let u = '';
       try { const q = new URLSearchParams(location.search).get('api'); if (q) { u = q; history.replaceState(null, '', location.pathname); } } catch (e) { /* ignore */ }
-      if (!u) { try { u = localStorage.getItem('boq.api') || ''; } catch (e) { /* ignore */ } }
+      if (!u) { try { u = store.getItem('boq.api') || ''; } catch (e) { /* ignore */ } }
       let auto = false;
-      if (!u && window.SYNC_URL) { try { auto = localStorage.getItem('boq.noauto') !== '1'; } catch (e) { auto = true; } if (auto) u = window.SYNC_URL; }
+      if (!u && window.SYNC_URL) { try { auto = store.getItem('boq.noauto') !== '1'; } catch (e) { auto = true; } if (auto) u = window.SYNC_URL; }
       setStatus('local');
       if (!u) return;
-      const had = (() => { try { return localStorage.getItem('boq.api') === u; } catch (e) { return false; } })();
+      const had = (() => { try { return store.getItem('boq.api') === u; } catch (e) { return false; } })();
       if (had) {                                   // already connected on this computer: resume quietly
         api = u; setStatus('syncing'); startPolling();
         try {
-          let saved = null; try { saved = JSON.parse(localStorage.getItem('boq.snap') || 'null'); } catch (e) { /* ignore */ }
+          let saved = null; try { saved = JSON.parse(store.getItem('boq.snap') || 'null'); } catch (e) { /* ignore */ }
           const known = !!(saved && saved.api === api);
           snap.prices = known ? saved.prices : {}; snap.jobs = known ? saved.jobs : {}; snap.suppliers = known ? (saved.suppliers || {}) : {}; snap.settings = known ? saved.settings : '';
           const r = await call('GET', 'action=list&since=0');
@@ -2261,7 +2286,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#chk-client').checked = !!settings.clientMode;
   showTab('boq');
   sync.init();
-  window.__boq = { sync, syncNow: () => sync.now(), get job() { return job; }, get prices() { return prices; }, get settings() { return settings; }, get suppliers() { return suppliers; } };
+  window.__boq = { sync, syncNow: () => sync.now(), get job() { return job; }, get prices() { return prices; }, get settings() { return settings; }, get suppliers() { return suppliers; }, get jobs() { return jobs; } };
 })();
 
 </script>
