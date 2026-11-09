@@ -152,6 +152,7 @@ td input[data-f=qty],td input[data-f=rate]{min-width:84px}
 
 #modal-msg{white-space:pre-line}
 .help-d summary{cursor:pointer;font-weight:600;color:#1d4f91;min-height:32px}
+.supadd{display:inline-flex;gap:2px;align-items:center}.supadd input{min-width:110px}.supadd .iconbtn{font-weight:700}
 
 </style>
 </head>
@@ -1423,11 +1424,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       save('boq.suppliers', suppliers); save('boq.job', job); catMap = {}; subMap = [];
     }
     pDirty = false; rebase(); updateBars(); refreshLists(); sync.schedule();
+    if (sDirty) commitSuppliers();                               // suppliers created from the price list are saved together with it
     return before - prices.length;
   }
   function discardPrices() {
     prices = normPrices(JSON.parse(baseP)); ordCache = null; catMap = {}; subMap = [];
     pDirty = false; updateBars(); refreshLists();
+    if (sDirty) discardSuppliers();
   }
   function commitSuppliers() {
     suppliers = suppliers.filter(x => x.name.trim());
@@ -1496,9 +1499,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   const expRate = (lp, l) => { const r = (l.suppliers || []).length ? supRate(lp, l.suppliers[0]) : null; return r != null ? r : lp.rate; };
   const lineChips = (l, lp) => (l.suppliers || []).map((n, k) => { const r = lp ? supRate(lp, n) : null;
     return '<span class="schip' + (k === 0 ? ' pri' : '') + '"><span class="sn" data-act="suppri" data-k="' + k + '" title="' + (k === 0 ? 'Rate is taken from this supplier' : 'Click to price from this supplier') + '">' + esc(n) + (r != null ? ' ' + money(r) : '') + '</span><button class="x" data-act="supdel" data-k="' + k + '" title="Remove supplier">&times;</button></span>'; }).join('') +
-    '<input data-f="sup" list="dl-sup" autocomplete="off" placeholder="' + ((l.suppliers || []).length ? '+ add another' : 'Supplier...') + '">';
+    '<span class="supadd"><input data-f="sup" list="dl-sup" autocomplete="off" aria-label="Supplier" placeholder="' + ((l.suppliers || []).length ? '+ add another' : 'Supplier...') + '"><button class="iconbtn" data-act="supadd" title="Add this supplier" aria-label="Add this supplier">+</button></span>';
   const priceChips = p => (p.sups || []).map((x, k) => '<span class="schip">' + esc(x.name) + ' $<input class="srate" type="number" step="any" min="0" data-f="srate" data-k="' + k + '" value="' + esc(x.rate) + '" title="Price from this supplier ($, ex GST)"><button class="x" data-act="supdel" data-k="' + k + '" title="Remove supplier">&times;</button></span>').join('') +
-    '<input data-f="psup" list="dl-sup" autocomplete="off" placeholder="' + ((p.sups || []).length ? '+ add another' : 'Supplier...') + '">';
+    '<span class="supadd"><input data-f="psup" list="dl-sup" autocomplete="off" aria-label="Supplier" placeholder="' + ((p.sups || []).length ? '+ add another' : 'Supplier...') + '"><button class="iconbtn" data-act="supadd" title="Add this supplier" aria-label="Add this supplier">+</button></span>';
   function repriceLine(l) {
     if (l.custom || !l.desc) return;
     const lp = listPrice(l), n = (l.suppliers || [])[0], r = lp && n ? supRate(lp, n) : null;
@@ -1655,7 +1658,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     return created;
   }
   /* put names on holder[field], creating missing suppliers and tagging each with the category */
-  function addSuppliersTo(holder, raw, field, cat) {
+  function addSuppliersTo(holder, raw, field, cat, stage) {
     field = field || 'suppliers'; if (cat === undefined) cat = holder.cat;
     const names = String(raw || '').split(/[,;]/).map(x => x.trim()).filter(Boolean), created = [];
     names.forEach(n => {
@@ -1666,23 +1669,41 @@ https://github.com/nodeca/pako/blob/main/LICENSE
       if (field === 'sups') { if (!holder.sups.some(x => x.name === s.name)) holder.sups.push({ name: s.name, rate: +holder.rate || 0 }); }
       else if (holder[field].indexOf(s.name) < 0) holder[field].push(s.name);
     });
-    if (names.length) saveSuppliers();
-    if (created.length) toast('New supplier saved to the Suppliers list: ' + created.join(', '));
+    if (names.length) { if (stage) { if (created.length) stageSup(); } else saveSuppliers(); }
+    if (created.length) toast(stage ? 'New supplier added - it is saved to the Suppliers list when you press Save changes: ' + created.join(', ') : 'New supplier saved to the Suppliers list: ' + created.join(', '));
     return names.length > 0;
   }
-  $('#lines').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'sup') { const l = lineOf(t); if (l) { const lp = listPrice(l); fillSupList(l.cat, l.suppliers, lp ? (lp.sups || []).map(x => x.name) : []); } } });
-  $('#lines').addEventListener('change', e => {
+  /* A supplier is only added when the user means it: Enter, the + button, or picking an existing name from the list.
+     Merely leaving the box (clicking elsewhere, switching window) never saves half-typed text. */
+  const knownSup = v => { v = String(v || '').trim().toLowerCase(); return !!v && suppliers.some(x => x.name.trim().toLowerCase() === v); };
+  const assignedSups = l => { const lp = listPrice(l); return lp ? (lp.sups || []).map(x => x.name) : []; };
+  $('#lines').addEventListener('focusin', e => {
     const t = e.target; if (!t.dataset || t.dataset.f !== 'sup') return;
     const l = lineOf(t); if (!l) return;
+    const names = assignedSups(l).filter(n => (l.suppliers || []).indexOf(n) < 0);       // only suppliers assigned to this item
+    $('#dl-sup').innerHTML = names.map(n => '<option value="' + esc(n) + '">').join('');
+    t.placeholder = names.length ? 'Pick or type a supplier' : (t.placeholder || 'Supplier...');
+  });
+  function commitLineSup(t, refocus) {
+    const l = lineOf(t); if (!l) return;
     const v = t.value, was = (l.suppliers || [])[0]; t.value = '';
-    if (addSuppliersTo(l, v)) { if (l.suppliers[0] !== was) repriceLine(l); saveJobDraft(); renderRow(l.id); renderTotals(); }
+    if (addSuppliersTo(l, v)) { if (l.suppliers[0] !== was) repriceLine(l); saveJobDraft(); renderRow(l.id, refocus ? 'sup' : undefined); renderTotals(); }
+  }
+  $('#lines').addEventListener('change', e => {
+    const t = e.target; if (!t.dataset || t.dataset.f !== 'sup') return;
+    if (knownSup(t.value)) commitLineSup(t, false);                   // picked from the list
   });
   $('#lines').addEventListener('keydown', e => {
     const t = e.target; if (e.key !== 'Enter' || !t.dataset || t.dataset.f !== 'sup') return;
-    e.preventDefault();
-    const l = lineOf(t); if (!l) return;
-    const v = t.value, was = (l.suppliers || [])[0]; t.value = '';
-    if (addSuppliersTo(l, v)) { if (l.suppliers[0] !== was) repriceLine(l); saveJobDraft(); renderRow(l.id, 'sup'); renderTotals(); }
+    e.preventDefault(); commitLineSup(t, true);
+  });
+  $('#lines').addEventListener('focusout', e => {
+    const t = e.target; if (t.dataset && t.dataset.f === 'sup') setTimeout(() => { if (t.isConnected && t.value.trim() && !knownSup(t.value)) toast('"' + t.value.trim() + '" was NOT added. Press Enter or the + button to add it as a supplier.'); }, 300);
+  });
+
+  $('#lines').addEventListener('click', e => {
+    const b = e.target.closest('[data-act="supadd"]'); if (!b) return;
+    const inp = $('input[data-f="sup"]', b.closest('td')); if (inp && inp.value.trim()) commitLineSup(inp, true); else if (inp) inp.focus();
   });
 
   /* ---------- totals ---------- */
@@ -1924,6 +1945,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (!nw || nw === old) { renderCatMgr(); return; }
     const exists = k === 'cat' ? ord().cats.indexOf(nw) >= 0 : (ord().subs[c] || []).indexOf(nw) >= 0;
     if (exists && (await ask('"' + nw + '" already exists. Merge "' + old + '" into it?', ['Merge', 'Cancel'])) !== 0) { renderCatMgr(); return; }
+    if (!exists && (await ask('Rename ' + (k === 'cat' ? 'category' : 'sub-category') + ' "' + old + '" to "' + nw + '" on every item?', ['Rename', 'Cancel'])) !== 0) { renderCatMgr(); return; }
     if (k === 'cat') {
       prices.forEach(p => { if (p.cat === old) p.cat = nw; p.also = (p.also || []).map(a => a === old ? nw : a).filter((a, i, arr) => a !== p.cat && arr.indexOf(a) === i); });
       Object.keys(catMap).forEach(x => { if (catMap[x] === old) catMap[x] = nw; }); catMap[old] = nw;
@@ -1997,9 +2019,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   const commitPriceSup = (t, refocus) => {
     const tr = t.closest('tr'), p = prices[+tr.dataset.i]; if (!p) return;
     const v = t.value; t.value = '';
-    if (addSuppliersTo(p, v, 'sups', p.cat)) { pricesChanged(); priceSupCell(tr); if (refocus) $('[data-f="psup"]', tr).focus(); }
+    if (addSuppliersTo(p, v, 'sups', p.cat, true)) { pricesChanged(); priceSupCell(tr); if (refocus) $('[data-f="psup"]', tr).focus(); }
   };
-  $('#prices').addEventListener('change', e => { if (e.target.dataset && e.target.dataset.f === 'psup') commitPriceSup(e.target, false); });
+  $('#prices').addEventListener('change', e => { if (e.target.dataset && e.target.dataset.f === 'psup' && knownSup(e.target.value)) commitPriceSup(e.target, false); });
+  $('#prices').addEventListener('focusout', e => { const t = e.target; if (t.dataset && t.dataset.f === 'psup') setTimeout(() => { if (t.isConnected && t.value.trim() && !knownSup(t.value)) toast('"' + t.value.trim() + '" was NOT added. Press Enter or the + button to add it as a supplier.'); }, 300); });
+  $('#prices').addEventListener('click', e => { const b = e.target.closest('[data-act="supadd"]'); if (!b) return; const inp = $('input[data-f="psup"]', b.closest('td')); if (inp && inp.value.trim()) commitPriceSup(inp, true); else if (inp) inp.focus(); });
   $('#prices').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset && e.target.dataset.f === 'psup') { e.preventDefault(); commitPriceSup(e.target, true); } });
   $('#prices').addEventListener('click', async e => {
     const sx = e.target.closest('[data-act="supdel"]');
