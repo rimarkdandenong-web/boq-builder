@@ -153,6 +153,7 @@ td input[data-f=qty],td input[data-f=rate]{min-width:84px}
 #modal-msg{white-space:pre-line}
 .help-d summary{cursor:pointer;font-weight:600;color:#1d4f91;min-height:32px}
 .supadd{display:inline-flex;gap:2px;align-items:center}.supadd input{min-width:110px}.supadd .iconbtn{font-weight:700}
+tr.dup td{background:#fff4f2}tr.dup td:first-child{box-shadow:inset 3px 0 #c0392b}
 
 </style>
 </head>
@@ -1286,6 +1287,41 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   };
   const newLine = () => ({ id: uid(), cat: '', sub: '', desc: '', unit: '', qty: '', rate: 0, custom: false });
   const newJob = () => ({ id: uid(), project: '', client: '', site: '', date: today(), ref: '', rfq: '', by: '', lines: [newLine()] });
+  /* ---- consistent spelling/case, and duplicate keys ---- */
+  const ACR = new Set(['PVC','UPVC','MDF','HDPE','LVL','CFC','RHS','SHS','CHS','PFC','UB','UC','DN','SDR','PN','AS','NZ','CCA','ACQ','LED','FRC','WPC','UV','RC','PP','PE','DIY','TBA']);
+  const SMALL = new Set(['and','of','for','with','to','in','on','the','a','an','per','or','x']);
+  const DIGIT_UNITS = { mpa: 'MPa', kpa: 'kPa', kn: 'kN', kw: 'kW' };
+  const sp = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  const ckey = v => sp(v).toLowerCase().replace(/[.,]/g, '').replace(/\s*([\/x\-])\s*/g, '$1');
+  function caseTok(w, allCaps, first) {
+    if (/^\d/.test(w)) {                                                  // sizes: 75MM -> 75mm, 200X75 -> 200x75, 20MPA -> 20MPa
+      if (/^\d+(\.\d+)?L$/.test(w)) return w;
+      let o = w.toLowerCase(); Object.keys(DIGIT_UNITS).forEach(k => { o = o.replace(new RegExp('(\\d)' + k + '$'), '$1' + DIGIT_UNITS[k]); }); return o;
+    }
+    const up = w.toUpperCase();
+    if (/\d/.test(w)) return /^[A-Za-z]{1,3}\d/.test(w) ? up : w;               // H3, F11, N20, M12
+    if (ACR.has(up)) return up;
+    if (w === up && w.length <= 3 && !allCaps && /[A-Za-z]{2}/.test(w)) return w;   // short acronym typed in capitals
+    const lw = w.toLowerCase();
+    if (!first && SMALL.has(lw)) return lw;
+    return lw.charAt(0).toUpperCase() + lw.slice(1);
+  }
+  function smartCase(v) {
+    v = sp(v); if (!v) return v;
+    const allCaps = v === v.toUpperCase() && /[A-Z]/.test(v);
+    return v.split(' ').map((w, i) => w.split(/([\/\-])/).map((p, j) => /^[\/\-]$/.test(p) ? p : caseTok(p, allCaps, i === 0 && j === 0)).join('')).join(' ');
+  }
+  const UNIT_MAP = { m2: 'm²', sqm: 'm²', 'm^2': 'm²', m3: 'm³', cum: 'm³', 'm^3': 'm³', ea: 'each', lm: 'm', hr: 'hour', hrs: 'hour', tonnes: 'tonne', t: 'tonne', litre: 'L', l: 'L' };
+  function canonUnit(v) {
+    v = sp(v); if (!v) return v;
+    const k = v.toLowerCase();
+    const known = (typeof prices !== 'undefined' ? prices : []).map(p => p.unit).find(u => u && u.toLowerCase() === k);
+    if (known) return known;
+    return UNIT_MAP[k] || (/[²³]/.test(v) ? v.toLowerCase() : v.toLowerCase());
+  }
+  const priceKey = p => [p.cat, p.sub, (p.type != null && p.type !== '') ? p.type : p.desc, p.spec, p.spec2].map(ckey).join('|');
+  /* the spelling already used elsewhere in the list wins over a new spelling of the same word */
+  function snapField(list, f, v, except) { const k = ckey(v), q = list.find(x => x !== except && x[f] && ckey(x[f]) === k); return q ? q[f] : smartCase(v); }
   function parseAlso(v, home) {
     const list = Array.isArray(v) ? v : String(v || '').split(/[,;]/);
     const out = [];
@@ -1462,17 +1498,35 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     if (b.dataset.tab !== cur && ((cur === 'prices' && pDirty) || (cur === 'suppliers' && sDirty))) {
       const r = await ask('You have unsaved changes in the ' + (cur === 'prices' ? 'Price list' : 'Suppliers') + '.', ['Save and leave', 'Discard changes', 'Stay here']);
       if (r === 2) return;
+      if (r === 0 && (cur === 'prices' ? dupPriceNames() : dupSupNames()).length) { await (cur === 'prices' ? blockDupPrices() : blockDupSups()); return; }
       if (cur === 'prices') { if (r === 0) commitPrices(); else discardPrices(); } else { if (r === 0) commitSuppliers(); else discardSuppliers(); }
     }
     showTab(b.dataset.tab);
   });
+  /* names of duplicate items (same category, sub-category, item type, specs, ignoring capitals and spacing) */
+  function dupPriceNames() {
+    const seen = {}, out = [];
+    prices.forEach(p => { if (!sp(p.type || p.desc)) return; const k = priceKey(p); if (seen[k]) out.push((p.cat ? p.cat + ' > ' : '') + p.desc); seen[k] = 1; });
+    return out;
+  }
+  async function blockDupPrices() {
+    const d = dupPriceNames(); if (!d.length) return false;
+    flagDupRows();
+    await ask('Cannot save: these items are in the list more than once (same category, sub-category, item and specs):\n\n' + d.slice(0, 6).join('\n') + (d.length > 6 ? '\n...and ' + (d.length - 6) + ' more' : '') + '\n\nThe repeated rows are marked in red. Change or delete the extra ones, then save.', ['OK']);
+    return true;
+  }
   $('#p-save').onclick = async () => {
-    const seen = {}, dups = [];
-    prices.forEach(p => { if (!p.desc) return; const k = [p.cat, p.sub, p.desc, p.spec, p.spec2].map(x => String(x || '').trim().toLowerCase()).join('|'); if (seen[k]) dups.push(p.desc + (p.spec ? ' ' + p.spec : '') + (p.spec2 ? ' ' + p.spec2 : '')); seen[k] = 1; });
-    if (dups.length && (await ask('These items appear more than once with the same category and specs:\n\n' + dups.slice(0, 6).join('\n') + (dups.length > 6 ? '\n...and ' + (dups.length - 6) + ' more' : '') + '\n\nSave anyway?', ['Go back and fix', 'Save anyway'])) !== 1) return;
+    if (dupPriceNames().length) { await blockDupPrices(); return; }
     const d = commitPrices(); renderPrices(); if ($('#cat-mgr') && !$('#cat-mgr').hidden) renderCatMgr(); await writeDb('Price list saved' + (d ? ' (' + d + ' empty row' + (d > 1 ? 's' : '') + ' removed)' : '')); };
   $('#p-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardPrices(); renderPrices(); if (!$('#cat-mgr').hidden) renderCatMgr(); toast('Changes discarded'); } };
-  $('#s-save').onclick = async () => { commitSuppliers(); renderSuppliers(); await writeDb('Suppliers saved'); };
+  function dupSupNames() { const seen = {}, out = []; suppliers.forEach(x => { const k = ckey(x.name); if (!k) return; if (seen[k]) out.push(x.name); seen[k] = 1; }); return out; }
+  function flagDupSups() { const c = {}; suppliers.forEach(x => { const k = ckey(x.name); if (k) c[k] = (c[k] || 0) + 1; }); $$('#s-rows tr').forEach(tr => { const x = suppliers.find(y => y.id === tr.dataset.id); tr.classList.toggle('dup', !!(x && c[ckey(x.name)] > 1)); }); }
+  async function blockDupSups() {
+    const d = dupSupNames(); if (!d.length) return false; flagDupSups();
+    await ask('Cannot save: these suppliers are in the list more than once:\n\n' + d.join('\n') + '\n\nThe repeated rows are marked in red. Rename or delete the extra ones, then save.', ['OK']);
+    return true;
+  }
+  $('#s-save').onclick = async () => { if (dupSupNames().length) { await blockDupSups(); return; } commitSuppliers(); renderSuppliers(); await writeDb('Suppliers saved'); };
   $('#s-discard').onclick = async () => { if ((await ask('Throw away the changes you have made since the last save?', ['Discard changes', 'Keep editing'])) === 0) { discardSuppliers(); renderSuppliers(); toast('Changes discarded'); } };
 
   /* ---------- BOQ lines ---------- */
@@ -1652,8 +1706,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     dl.innerHTML = list.map(x => '<option value="' + esc(x.name) + '">' + (x.cats.length ? esc(x.cats.join(', ')) : '') + '</option>').join('');
   }
   function ensureSup(name, cat) {
-    let s = suppliers.find(x => x.name.toLowerCase() === name.toLowerCase()), created = false;
-    if (!s) { s = { id: uid(), name, cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created = true; }
+    let s = suppliers.find(x => ckey(x.name) === ckey(name)), created = false;
+    if (!s) { s = { id: uid(), name: smartCase(name), cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created = true; }
     if (cat && s.cats.indexOf(cat) < 0) s.cats.push(cat);
     return created;
   }
@@ -1662,8 +1716,8 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     field = field || 'suppliers'; if (cat === undefined) cat = holder.cat;
     const names = String(raw || '').split(/[,;]/).map(x => x.trim()).filter(Boolean), created = [];
     names.forEach(n => {
-      let s = suppliers.find(x => x.name.toLowerCase() === n.toLowerCase());
-      if (!s) { s = { id: uid(), name: n, cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created.push(n); }
+      let s = suppliers.find(x => ckey(x.name) === ckey(n));
+      if (!s) { s = { id: uid(), name: smartCase(n), cats: [], phone: '', email: '', note: '' }; suppliers.push(s); created.push(s.name); }
       if (cat && s.cats.indexOf(cat) < 0) s.cats.push(cat);
       holder[field] = holder[field] || [];
       if (field === 'sups') { if (!holder.sups.some(x => x.name === s.name)) holder.sups.push({ name: s.name, rate: +holder.rate || 0 }); }
@@ -1675,7 +1729,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   }
   /* A supplier is only added when the user means it: Enter, the + button, or picking an existing name from the list.
      Merely leaving the box (clicking elsewhere, switching window) never saves half-typed text. */
-  const knownSup = v => { v = String(v || '').trim().toLowerCase(); return !!v && suppliers.some(x => x.name.trim().toLowerCase() === v); };
+  const knownSup = v => { v = ckey(v); return !!v && suppliers.some(x => ckey(x.name) === v); };
   const assignedSups = l => { const lp = listPrice(l); return lp ? (lp.sups || []).map(x => x.name) : []; };
   $('#lines').addEventListener('focusin', e => {
     const t = e.target; if (!t.dataset || t.dataset.f !== 'sup') return;
@@ -1900,7 +1954,9 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#s-rows').addEventListener('change', e => {
     const t = e.target; if (t.dataset.f !== 'name') return;
     const x = suppliers.find(y => y.id === t.closest('tr').dataset.id);
-    if (x && x.name.trim() && suppliers.some(y => y !== x && y.name.trim().toLowerCase() === x.name.trim().toLowerCase())) toast('A supplier called "' + x.name.trim() + '" already exists in the list.');
+    if (x && sp(t.value)) { const nv = smartCase(t.value); if (nv !== t.value) { t.value = nv; x.name = nv; stageSup(); } }
+    flagDupSups();
+    if (x && x.name.trim() && suppliers.some(y => y !== x && ckey(y.name) === ckey(x.name))) toast('A supplier called "' + x.name.trim() + '" already exists in the list.');
   });
   $('#s-rows').addEventListener('click', async e => {
     const b = e.target.closest('[data-act="sdel"]'); if (!b) return;
@@ -1941,9 +1997,11 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   $('#p-cats').onclick = () => { const m = $('#cat-mgr'); m.hidden = !m.hidden; if (!m.hidden) renderCatMgr(); };
   $('#cat-mgr').addEventListener('change', async e => {
     const t = e.target, k = t.dataset.k; if (!k) return;
-    const old = t.dataset.o, nw = t.value.trim(), c = t.dataset.c;
+    const old = t.dataset.o, c = t.dataset.c; let nw = smartCase(t.value);
+    const pool = k === 'cat' ? ord().cats : (ord().subs[c] || []), hit = pool.find(x => ckey(x) === ckey(nw) && x !== old);
+    if (hit) nw = hit;
     if (!nw || nw === old) { renderCatMgr(); return; }
-    const exists = k === 'cat' ? ord().cats.indexOf(nw) >= 0 : (ord().subs[c] || []).indexOf(nw) >= 0;
+    const exists = !!hit;
     if (exists && (await ask('"' + nw + '" already exists. Merge "' + old + '" into it?', ['Merge', 'Cancel'])) !== 0) { renderCatMgr(); return; }
     if (!exists && (await ask('Rename ' + (k === 'cat' ? 'category' : 'sub-category') + ' "' + old + '" to "' + nw + '" on every item?', ['Rename', 'Cancel'])) !== 0) { renderCatMgr(); return; }
     if (k === 'cat') {
@@ -2010,9 +2068,23 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     }
     pricesChanged();
   });
+  function flagDupRows() {
+    const seen = {}, dup = {};
+    prices.forEach(p => { if (!sp(p.type || p.desc)) return; const k = priceKey(p); if (seen[k]) { dup[p.id] = 1; dup[seen[k]] = 1; } else seen[k] = p.id; });
+    $$('#prices tr').forEach(tr => { const p = prices[+tr.dataset.i]; tr.classList.toggle('dup', !!(p && dup[p.id])); });
+    return Object.keys(dup).length;
+  }
   $('#prices').addEventListener('change', e => {
-    const t = e.target;
-    if (t.dataset.f === 'sub' && !t.value.trim()) { t.value = 'General'; prices[+t.closest('tr').dataset.i].sub = 'General'; pricesChanged(); }
+    const t = e.target, f = t.dataset.f, tr = t.closest('tr'); if (!f || !tr || tr.dataset.i === undefined) return;
+    const p = prices[+tr.dataset.i]; if (!p) return;
+    if (f === 'sub' && !t.value.trim()) { t.value = 'General'; p.sub = 'General'; pricesChanged(); }
+    if (['cat', 'sub', 'type', 'spec', 'spec2'].indexOf(f) >= 0 && sp(t.value)) {
+      const nv = snapField(prices, f, t.value, p);
+      if (nv !== t.value) { t.value = nv; p[f] = nv; if (f === 'cat') p.also = (p.also || []).filter(c => c !== p.cat); p.desc = joinDesc(p.type, p.spec, p.spec2); pricesChanged(); }
+      else if (sp(t.value) !== t.value) { t.value = sp(t.value); p[f] = t.value; pricesChanged(); }
+    } else if (f === 'unit' && sp(t.value)) { const nv = canonUnit(t.value); t.value = nv; p.unit = nv; pricesChanged(); }
+    else if (f === 'also') { const cats = ord().cats; p.also = parseAlso(t.value, p.cat).map(c => cats.find(x => ckey(x) === ckey(c)) || smartCase(c)); t.value = p.also.join(', '); pricesChanged(); }
+    if (flagDupRows() && ['cat', 'sub', 'type', 'spec', 'spec2'].indexOf(f) >= 0 && $('#prices tr.dup') && tr.classList.contains('dup')) toast('This item already exists in the price list (same category, sub-category, item and specs). Change it or delete the extra row - it cannot be saved twice.');
   });
   const priceSupCell = tr => { const p = prices[+tr.dataset.i]; $('td.sup', tr).innerHTML = priceChips(p); return p; };
   $('#prices').addEventListener('focusin', e => { const t = e.target; if (t.dataset && t.dataset.f === 'psup') { const p = prices[+t.closest('tr').dataset.i]; if (p) fillSupList(p.cat, (p.sups || []).map(x => x.name)); } });
@@ -2116,18 +2188,20 @@ https://github.com/nodeca/pako/blob/main/LICENSE
         lc = cat; ls = sub || ls;
         out.push({ code: g('code'), cat, sub: sub || 'General', type: desc, spec: g('spec'), spec2: g('spec2'), unit: g('unit'), rate: parseFloat(g('rate').replace(/[^0-9.\-]/g, '')) || 0, also: g('also'), note: g('note'), sups: g('sups') });
       }
+      out.forEach(o => { o.cat = smartCase(o.cat); o.sub = smartCase(o.sub) || 'General'; o.type = smartCase(o.type); o.spec = smartCase(o.spec); o.spec2 = smartCase(o.spec2); o.unit = canonUnit(o.unit); });
+      { const seen = {}, keep = []; out.forEach(o => { const k = priceKey(o); if (!seen[k]) { seen[k] = 1; keep.push(o); } }); const skipped = out.length - keep.length; out.length = 0; keep.forEach(o => out.push(o)); if (skipped) toast(skipped + ' repeated row' + (skipped > 1 ? 's' : '') + ' in the file ignored.'); }
       if (!out.length) { toast('No items found under the headings.'); return; }
       const r = await ask('Found ' + out.length + ' items in "' + file.name + '".\n\nReplace: use only these items.\nMerge: update rates of matching items and add the new ones.', ['Replace price list', 'Merge', 'Cancel']);
       if (r === 2) return;
       if (r === 0) prices = normPrices(out);
       else {
-        const key = p => (p.cat + '|' + p.sub + '|' + p.desc).toLowerCase(); const idx = {};
+        const key = p => priceKey(p); const idx = {};
         prices.forEach((p, i) => { idx[key(p)] = i; });
         let upd = 0, add = 0;
         normPrices(out).forEach(p => { const k = key(p); if (k in idx) { Object.assign(prices[idx[k]], { unit: p.unit, rate: p.rate, code: p.code || prices[idx[k]].code, also: (p.also && p.also.length) ? p.also : prices[idx[k]].also, note: p.note || prices[idx[k]].note || '', sups: (p.sups && p.sups.length) ? p.sups : (prices[idx[k]].sups || []) }); upd++; } else { prices.push(p); add++; } });
         toast('Merged: ' + upd + ' updated, ' + add + ' added');
       }
-      prices.forEach(p => (p.sups || []).forEach(x => ensureSup(x.name, p.cat)));
+      prices.forEach(p => (p.sups || []).forEach(x => { ensureSup(x.name, p.cat); const sx = suppliers.find(y => ckey(y.name) === ckey(x.name)); if (sx) x.name = sx.name; }));
       saveSuppliers(); pricesChanged(); commitPrices(); renderPrices();
       if (r === 0) toast('Price list replaced (' + prices.length + ' items)');
     } catch (err) { console.error(err); toast('Import failed: ' + err.message); }
