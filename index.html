@@ -154,6 +154,21 @@ td input[data-f=qty],td input[data-f=rate]{min-width:84px}
 .help-d summary{cursor:pointer;font-weight:600;color:#1d4f91;min-height:32px}
 .supadd{display:inline-flex;gap:2px;align-items:center}.supadd input{min-width:110px}.supadd .iconbtn{font-weight:700}
 tr.dup td{background:#fff4f2}tr.dup td:first-child{box-shadow:inset 3px 0 #c0392b}
+/* price list: columns wide enough to read whole entries; the table scrolls sideways instead of squeezing text */
+table.prices{table-layout:fixed;width:1950px;min-width:100%}
+.prices th:nth-child(1),.prices td:nth-child(1){width:110px}
+.prices th:nth-child(2),.prices td:nth-child(2){width:180px}
+.prices th:nth-child(3),.prices td:nth-child(3){width:200px}
+.prices th:nth-child(4),.prices td:nth-child(4){width:300px}
+.prices th:nth-child(5),.prices td:nth-child(5){width:240px}
+.prices th:nth-child(6),.prices td:nth-child(6){width:180px}
+.prices th:nth-child(7),.prices td:nth-child(7){width:84px}
+.prices th:nth-child(8),.prices td:nth-child(8){width:100px}
+.prices th:nth-child(9),.prices td:nth-child(9){width:190px}
+.prices th:nth-child(10),.prices td:nth-child(10){width:330px}
+.prices th:nth-child(11),.prices td:nth-child(11){width:96px}
+.prices td input:not(.srate){width:100%;box-sizing:border-box;text-overflow:ellipsis}
+.prices td.sup .schip{max-width:100%;white-space:normal}
 
 </style>
 </head>
@@ -2052,6 +2067,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
     });
   };
   showAll($('#prices')); showAll($('#lines'));
+  $('#prices').addEventListener('mouseover', e => { const t = e.target; if (t.tagName === 'INPUT' && t.type !== 'number' && t.value) t.title = t.value; });
   $('#prices').addEventListener('input', e => {
     const t = e.target, f = t.dataset.f; if (!f || f === 'psup') return;
     if (f === 'srate') { const pp = prices[+t.closest('tr').dataset.i]; if (pp && pp.sups[+t.dataset.k]) { pp.sups[+t.dataset.k].rate = parseFloat(t.value) || 0; pricesChanged(); } return; }
